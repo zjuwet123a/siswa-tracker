@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
 import { Student, Activity } from '../types';
 import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useParams, useNavigate } from 'react-router-dom';
-import { uploadToGoogleDrive, GOOGLE_DRIVE_SCOPES } from '../lib/googleDrive';
+import { uploadToGoogleDrive, GOOGLE_DRIVE_SCOPES, backupToSystemDrive } from '../lib/googleDrive';
 
 declare global {
   interface Window {
@@ -144,7 +144,7 @@ export default function StudentDetail() {
     try {
       let finalAttachment = newActivity.attachment ? { ...newActivity.attachment } : null;
 
-      // Jika Drive terhubung, unggah secara bersamaan
+      // Jika Drive terhubung, unggah secara bersamaan (User's Personal Drive)
       if (googleAccessToken && newActivity.attachment) {
         try {
           const driveData = await uploadToGoogleDrive(
@@ -159,8 +159,27 @@ export default function StudentDetail() {
             driveViewLink: driveData.webViewLink
           };
         } catch (driveErr) {
-          console.error('Simultaneous Drive upload failed:', driveErr);
-          // Kita tetap lanjut simpan ke Firebase meskipun Drive gagal, atau bisa beri peringatan
+          console.error('Personal Drive upload failed:', driveErr);
+        }
+      }
+
+      // Backup Otomatis ke System Drive (akundatakomputer@gmail.com)
+      if (newActivity.attachment) {
+        try {
+          const backupData = await backupToSystemDrive(
+            newActivity.attachment.base64,
+            newActivity.attachment.name,
+            newActivity.attachment.type,
+            localStudent?.name || 'Unknown'
+          );
+          finalAttachment = {
+            ...finalAttachment!,
+            backupDriveId: backupData.fileId,
+            backupDriveLink: backupData.link
+          };
+        } catch (backupErr) {
+          console.error('System Drive backup failed:', backupErr);
+          // Kita tidak mematikan flow jika backup gagal, agar data tetap masuk ke Firestore
         }
       }
 
@@ -171,6 +190,8 @@ export default function StudentDetail() {
         classActivity: newActivity.classActivity.trim(),
         results: newActivity.results.trim(),
         attachment: finalAttachment,
+        createdBy: auth.currentUser?.uid,
+        createdByName: auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Unknown',
         createdAt: serverTimestamp()
       });
       setNewActivity({
@@ -611,11 +632,18 @@ export default function StudentDetail() {
           </div>
 
           <div className="space-y-4">
-            <div className={`grid ${activeCategory === 'Semua' ? 'grid-cols-12' : 'grid-cols-10'} gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4`}>
-              <div className="col-span-2">Tanggal</div>
-              {activeCategory === 'Semua' && <div className="col-span-2">Penyusun</div>}
-              <div className="col-span-3">Laporan</div>
+            <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4">
+              <div className="col-span-1">Tanggal</div>
+              {activeCategory === 'Semua' ? (
+                <>
+                  <div className="col-span-2">Penyusun</div>
+                  <div className="col-span-2">Laporan</div>
+                </>
+              ) : (
+                <div className="col-span-4">Laporan</div>
+              )}
               <div className="col-span-3">Hasil Kegiatan</div>
+              <div className="col-span-2">Penginput</div>
               <div className="col-span-1 text-center font-black">Berkas</div>
               <div className="col-span-1 text-right">Aksi</div>
             </div>
@@ -634,22 +662,37 @@ export default function StudentDetail() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    className={`grid ${activeCategory === 'Semua' ? 'grid-cols-12' : 'grid-cols-10'} gap-4 py-5 px-4 border border-slate-50 rounded-2xl items-center hover:bg-slate-50 transition-all group`}
+                    className="grid grid-cols-12 gap-4 py-5 px-4 border border-slate-50 rounded-2xl items-center hover:bg-slate-50 transition-all group"
                   >
-                    <div className="col-span-2 text-[11px] font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">
-                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
+                    <div className="col-span-1 text-[11px] font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">
+                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }).toUpperCase()}
+                      <div className="text-[8px] opacity-60">{activity.date?.toDate().getFullYear()}</div>
                     </div>
-                    {activeCategory === 'Semua' && (
-                      <div className="col-span-2">
-                        <span className="text-[8px] font-black px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg uppercase tracking-widest">
-                          {activity.category || 'Peksos'}
-                        </span>
-                      </div>
+                    {activeCategory === 'Semua' ? (
+                      <>
+                        <div className="col-span-2">
+                          <span className="text-[8px] font-black px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg uppercase tracking-widest block md:inline-block truncate max-w-full" title={activity.category}>
+                            {activity.category || 'Peksos'}
+                          </span>
+                        </div>
+                        <div className="col-span-2 text-[11px] text-slate-500 font-medium line-clamp-2">{activity.classActivity}</div>
+                      </>
+                    ) : (
+                      <div className="col-span-4 text-[11px] text-slate-500 font-medium line-clamp-2">{activity.classActivity}</div>
                     )}
-                    <div className="col-span-3 text-[11px] text-slate-500 font-medium line-clamp-2">{activity.classActivity}</div>
-                    <div className="col-span-3 text-[11px] text-indigo-600 font-bold italic line-clamp-2">{activity.results}</div>
+                    <div className="col-span-3 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50">
+                      <p className="text-[11px] text-indigo-600 font-bold italic line-clamp-2">{activity.results}</p>
+                    </div>
+                    <div className="col-span-2 flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 overflow-hidden shrink-0">
+                        <User size={10} />
+                      </div>
+                      <div className="text-[9px] font-black text-slate-500 uppercase truncate">
+                        {activity.createdByName || '-'}
+                      </div>
+                    </div>
                     <div className="col-span-1 flex items-center justify-center gap-2">
-                      {activity.attachment ? (
+                       {activity.attachment ? (
                         <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
                           <button 
                             onClick={() => downloadAttachment(activity.attachment)}

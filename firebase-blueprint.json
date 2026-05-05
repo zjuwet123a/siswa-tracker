@@ -20,6 +20,8 @@
         "date": { "type": "string", "format": "date-time", "description": "The date of the learning activity" },
         "classActivity": { "type": "string", "description": "The activity performed in class" },
         "results": { "type": "string", "description": "The results or outcome of the activity" },
+        "createdBy": { "type": "string", "description": "ID of the user who created this activity" },
+        "createdByName": { "type": "string", "description": "Name of the user who created this activity" },
         "createdAt": { "type": "string", "format": "date-time", "description": "When the record was created" }
       },
       "required": ["studentId", "date", "classActivity", "results", "createdAt"]

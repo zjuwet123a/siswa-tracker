@@ -3,7 +3,7 @@ import { LayoutDashboard, Users, BookOpen, GraduationCap, LogOut, User, Lock, Ke
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useLocation } from 'react-router-dom';
 import { auth } from '../lib/firebase';
-import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
+import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword, getAuth, updateProfile } from 'firebase/auth';
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -29,6 +29,7 @@ export default function Layout({ children }: LayoutProps) {
 
   // New User States
   const [showAddUserModal, setShowAddUserModal] = React.useState(false);
+  const [newUserName, setNewUserName] = React.useState('');
   const [newUserEmail, setNewUserEmail] = React.useState('');
   const [newUserPassword, setNewUserPassword] = React.useState('');
   const [addUserLoading, setAddUserLoading] = React.useState(false);
@@ -96,6 +97,10 @@ export default function Layout({ children }: LayoutProps) {
       setAddUserError('Hanya admin yang dapat menambah user.');
       return;
     }
+    if (!newUserName.trim()) {
+      setAddUserError('Nama user wajib diisi.');
+      return;
+    }
     setAddUserLoading(true);
     setAddUserError(null);
 
@@ -104,12 +109,18 @@ export default function Layout({ children }: LayoutProps) {
       const secondaryApp = getApps().find(app => app.name === 'Secondary') || initializeApp(firebaseConfig, 'Secondary');
       const secondaryAuth = getAuth(secondaryApp);
 
-      await createUserWithEmailAndPassword(secondaryAuth, newUserEmail, newUserPassword);
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newUserEmail, newUserPassword);
+      
+      // Update display name for the new user
+      await updateProfile(userCredential.user, {
+        displayName: newUserName
+      });
       
       setAddUserSuccess(true);
       setTimeout(() => {
         setShowAddUserModal(false);
         setAddUserSuccess(false);
+        setNewUserName('');
         setNewUserEmail('');
         setNewUserPassword('');
         setIsProfileOpen(false);
@@ -403,6 +414,21 @@ export default function Layout({ children }: LayoutProps) {
                 </div>
               ) : (
                 <form onSubmit={handleAddUser} className="space-y-4">
+                  <div>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Nama Lengkap</label>
+                    <div className="relative">
+                      <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                      <input
+                        type="text"
+                        required
+                        value={newUserName}
+                        onChange={(e) => setNewUserName(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3.5 pl-12 pr-4 text-sm font-medium focus:bg-white focus:border-indigo-600 outline-none transition-all"
+                        placeholder="Nama Lengkap"
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Email User</label>
                     <div className="relative">

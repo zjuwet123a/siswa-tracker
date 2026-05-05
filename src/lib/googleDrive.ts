@@ -28,3 +28,25 @@ export async function uploadToGoogleDrive(fileBase64: string, fileName: string, 
 
   return await response.json();
 }
+
+export async function backupToSystemDrive(fileContent: string, fileName: string, fileType: string, studentName: string) {
+  const response = await fetch('/api/backup-drive', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      fileContent,
+      fileName,
+      fileType,
+      studentName
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || 'Gagal backup ke Google Drive');
+  }
+
+  return await response.json();
+}
