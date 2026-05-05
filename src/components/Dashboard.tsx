@@ -138,8 +138,8 @@ export default function Dashboard() {
 
           <div className="space-y-4">
             <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4 mr-2">
-              <div className="col-span-2">Penerima Manfaat</div>
               <div className="col-span-2">Tanggal</div>
+              <div className="col-span-2">Penerima Manfaat</div>
               <div className="col-span-2">Penyusun</div>
               <div className="col-span-3">Laporan</div>
               <div className="col-span-3">Hasil / Insight</div>
@@ -156,16 +156,25 @@ export default function Dashboard() {
                     transition={{ delay: idx * 0.1 }}
                     className="grid grid-cols-12 gap-4 py-6 px-6 bg-slate-50/50 hover:bg-white border border-transparent hover:border-slate-200 rounded-[2rem] items-center transition-all group"
                   >
+                    <div className="col-span-2 text-[10px] font-black text-slate-400">
+                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
+                    </div>
                     <div className="col-span-2 flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
-                        <User size={14} />
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 overflow-hidden">
+                        {studentsMap[activity.studentId]?.photoUrl ? (
+                          <img 
+                            src={studentsMap[activity.studentId].photoUrl} 
+                            alt={studentsMap[activity.studentId].name}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <User size={14} />
+                        )}
                       </div>
                       <div className="text-[11px] font-black text-slate-800 uppercase truncate">
                         {studentsMap[activity.studentId]?.name || 'Unknown Student'}
                       </div>
-                    </div>
-                    <div className="col-span-2 text-[10px] font-black text-slate-400">
-                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
                     </div>
                     <div className="col-span-2">
                        <span className="text-[8px] font-black px-2 py-1 bg-white shadow-sm text-indigo-600 rounded-lg uppercase tracking-widest border border-indigo-50">
