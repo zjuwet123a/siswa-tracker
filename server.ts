@@ -17,6 +17,22 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
+    
+    // Explicit SPA fallback for dev
+    app.get('*', async (req, res, next) => {
+      // Allow Vite to handle files (js, css, etc)
+      if (req.originalUrl.includes('.')) return next();
+      
+      const url = req.originalUrl;
+      try {
+        const fs = await import('fs');
+        let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     // Serving static files in production
     const distPath = path.join(process.cwd(), 'dist');
