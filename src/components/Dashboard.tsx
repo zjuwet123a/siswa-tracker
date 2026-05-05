@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, limit, collectionGroup } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Users, BarChart3, ChevronRight, Clock, User } from 'lucide-react';
+import { Users, BarChart3, ChevronRight, Clock, User, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { Activity, Student } from '../types';
@@ -35,6 +35,7 @@ export default function Dashboard() {
   });
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [studentsMap, setStudentsMap] = useState<Record<string, Student>>({});
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Listen to students for stats and lookup
@@ -47,6 +48,7 @@ export default function Dashboard() {
       setStudentsMap(map);
     }, (error) => {
       console.error('Dashboard students sync failed:', error);
+      setError('Gagal memuat data siswa. Pastikan koneksi stabil.');
     });
 
     // Listen to total activities count
@@ -54,6 +56,8 @@ export default function Dashboard() {
       setStats(prev => ({ ...prev, totalActivities: snap.size }));
     }, (error) => {
       console.error('Dashboard total activities sync failed:', error);
+      // Seringkali gagal karena index collectionGroup belum ada
+      setError('Index database sedang disiapkan atau bermasalah.');
     });
 
     // Listen to recent activities across all students
@@ -70,8 +74,10 @@ export default function Dashboard() {
         ...doc.data()
       })) as Activity[];
       setRecentActivities(activities);
+      setError(null);
     }, (error) => {
       console.error('Dashboard activities sync failed:', error);
+      setError('Gagal memuat riwayat terbaru (membutuhkan index).');
     });
 
     return () => {
@@ -88,6 +94,17 @@ export default function Dashboard() {
           <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">Dashboard PM</h2>
         </div>
       </div>
+
+      {error && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-center gap-3 text-rose-600"
+        >
+          <AlertCircle size={18} />
+          <p className="text-[10px] font-black uppercase tracking-widest">{error}</p>
+        </motion.div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <StatCard 
@@ -123,8 +140,9 @@ export default function Dashboard() {
             <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4 mr-2">
               <div className="col-span-2">Penerima Manfaat</div>
               <div className="col-span-2">Tanggal</div>
-              <div className="col-span-4">Kegiatan Kelas</div>
-              <div className="col-span-4">Hasil / Insight</div>
+              <div className="col-span-2">Penyusun</div>
+              <div className="col-span-3">Laporan</div>
+              <div className="col-span-3">Hasil / Insight</div>
             </div>
 
             <div className="space-y-3 max-h-[460px] overflow-y-auto pr-2 custom-scrollbar">
@@ -149,10 +167,15 @@ export default function Dashboard() {
                     <div className="col-span-2 text-[10px] font-black text-slate-400">
                       {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
                     </div>
-                    <div className="col-span-4 text-[11px] text-slate-600 font-medium line-clamp-2">
+                    <div className="col-span-2">
+                       <span className="text-[8px] font-black px-2 py-1 bg-white shadow-sm text-indigo-600 rounded-lg uppercase tracking-widest border border-indigo-50">
+                         {activity.category || 'Peksos'}
+                       </span>
+                    </div>
+                    <div className="col-span-3 text-[11px] text-slate-600 font-medium line-clamp-2">
                       {activity.classActivity}
                     </div>
-                    <div className="col-span-4 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50">
+                    <div className="col-span-3 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50">
                       <p className="text-[10px] font-bold text-indigo-600 italic line-clamp-2">
                         {activity.results}
                       </p>

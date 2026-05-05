@@ -2,24 +2,77 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Student, Activity } from '../types';
-import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2 } from 'lucide-react';
+import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useParams, useNavigate } from 'react-router-dom';
+import { uploadToGoogleDrive, GOOGLE_DRIVE_SCOPES } from '../lib/googleDrive';
+
+declare global {
+  interface Window {
+    google: any;
+  }
+}
 
 export default function StudentDetail() {
   const { studentId } = useParams<{ studentId: string }>();
   const navigate = useNavigate();
   const [localStudent, setLocalStudent] = useState<Student | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [activeCategory, setActiveCategory] = useState<'Semua' | Activity['category']>('Semua');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [studentNotFound, setStudentNotFound] = useState(false);
-  const [newActivity, setNewActivity] = useState({
+  const [newActivity, setNewActivity] = useState<{
+    date: string;
+    category: Activity['category'];
+    classActivity: string;
+    results: string;
+    attachment: Activity['attachment'] | null;
+  }>({
     date: new Date().toISOString().split('T')[0],
+    category: 'Peksos',
     classActivity: '',
-    results: ''
+    results: '',
+    attachment: null
   });
+  const [isAttachmentUploading, setIsAttachmentUploading] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [isDriveConnecting, setIsDriveConnecting] = useState(false);
+
+  const handleConnectDrive = () => {
+    const clientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      alert('VITE_GOOGLE_CLIENT_ID belum dikonfigurasi. Pastikan aplikasi memiliki Client ID dari Google Cloud Console.');
+      return;
+    }
+
+    setIsDriveConnecting(true);
+    try {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: GOOGLE_DRIVE_SCOPES,
+        callback: (response: any) => {
+          if (response.access_token) {
+            setGoogleAccessToken(response.access_token);
+            alert('Google Drive Tersambung! Berkas akan diunggah ke Drive secara otomatis.');
+          }
+          setIsDriveConnecting(false);
+        },
+        error_callback: (err: any) => {
+          console.error('GApi Error:', err);
+          setIsDriveConnecting(false);
+        }
+      });
+      client.requestAccessToken();
+    } catch (err) {
+      console.error('Drive connection error:', err);
+      setIsDriveConnecting(false);
+      alert('Gagal memuat Google SDK. Coba segarkan halaman.');
+    }
+  };
 
   useEffect(() => {
     if (!studentId) return;
@@ -56,7 +109,11 @@ export default function StudentDetail() {
       })) as Activity[];
       setActivities(docs);
       setLoading(false);
+      setError(null);
     }, (error) => {
+      console.error('Activities load failed:', error);
+      setError('Data tidak muncul? Tunggu proses sinkronisasi atau hubungi admin.');
+      setLoading(false);
       handleFirestoreError(error, OperationType.GET, `student activities for ${studentId}`);
     });
 
@@ -79,19 +136,51 @@ export default function StudentDetail() {
     e.preventDefault();
     if (!studentId || !newActivity.classActivity || !newActivity.results) return;
 
+    if (newActivity.category !== 'Instruktur' && !newActivity.attachment) {
+      alert('Mohon lampirkan berkas pendukung (DOCX, PDF, atau Excel).');
+      return;
+    }
+
     try {
+      let finalAttachment = newActivity.attachment ? { ...newActivity.attachment } : null;
+
+      // Jika Drive terhubung, unggah secara bersamaan
+      if (googleAccessToken && newActivity.attachment) {
+        try {
+          const driveData = await uploadToGoogleDrive(
+            newActivity.attachment.base64,
+            newActivity.attachment.name,
+            newActivity.attachment.type,
+            googleAccessToken
+          );
+          finalAttachment = {
+            ...finalAttachment!,
+            driveFileId: driveData.id,
+            driveViewLink: driveData.webViewLink
+          };
+        } catch (driveErr) {
+          console.error('Simultaneous Drive upload failed:', driveErr);
+          // Kita tetap lanjut simpan ke Firebase meskipun Drive gagal, atau bisa beri peringatan
+        }
+      }
+
       await addDoc(collection(db, `students/${studentId}/activities`), {
         studentId: studentId,
         date: Timestamp.fromDate(new Date(newActivity.date)),
+        category: newActivity.category,
         classActivity: newActivity.classActivity.trim(),
         results: newActivity.results.trim(),
+        attachment: finalAttachment,
         createdAt: serverTimestamp()
       });
       setNewActivity({
         date: new Date().toISOString().split('T')[0],
+        category: activeCategory !== 'Semua' ? activeCategory : 'Peksos',
         classActivity: '',
-        results: ''
+        results: '',
+        attachment: null
       });
+      setShowAddModal(false);
       alert('Data aktivitas berhasil disimpan!');
     } catch (error) {
       alert('Gagal menyimpan aktivitas: ' + (error instanceof Error ? error.message : 'Unknown error'));
@@ -101,10 +190,18 @@ export default function StudentDetail() {
 
   const [activityToDelete, setActivityToDelete] = useState<Activity | null>(null);
   const [activityToEdit, setActivityToEdit] = useState<Activity | null>(null);
-  const [editActivityForm, setEditActivityForm] = useState({
+  const [editActivityForm, setEditActivityForm] = useState<{
+    date: string;
+    category: Activity['category'];
+    classActivity: string;
+    results: string;
+    attachment: Activity['attachment'] | null;
+  }>({
     date: '',
+    category: 'Peksos',
     classActivity: '',
-    results: ''
+    results: '',
+    attachment: null
   });
   const [showDeleteStudentModal, setShowDeleteStudentModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -158,11 +255,18 @@ export default function StudentDetail() {
     e.preventDefault();
     if (!localStudent || !activityToEdit || !editActivityForm.classActivity || !editActivityForm.results) return;
 
+    if (editActivityForm.category !== 'Instruktur' && !editActivityForm.attachment) {
+      alert('Mohon lampirkan berkas pendukung.');
+      return;
+    }
+
     try {
       await updateDoc(doc(db, `students/${localStudent.id}/activities`, activityToEdit.id), {
         date: Timestamp.fromDate(new Date(editActivityForm.date)),
+        category: editActivityForm.category,
         classActivity: editActivityForm.classActivity.trim(),
         results: editActivityForm.results.trim(),
+        attachment: editActivityForm.attachment || null,
         updatedAt: serverTimestamp()
       });
       setActivityToEdit(null);
@@ -173,12 +277,62 @@ export default function StudentDetail() {
     }
   };
 
+  const handleActivityFileChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean = false) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validExtensions = ['.docx', '.pdf', '.xlsx', '.xls'];
+    const fileName = file.name.toLowerCase();
+    const isValid = validExtensions.some(ext => fileName.endsWith(ext));
+
+    if (!isValid) {
+      alert('Format file tidak didukung. Gunakan DOCX, PDF, atau Excel.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 500 * 1024) {
+      alert('Ukuran file maksimal 500KB');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadstart = () => setIsAttachmentUploading(true);
+    reader.onload = (event) => {
+      const attachment = {
+        name: file.name,
+        type: file.type,
+        base64: event.target?.result as string
+      };
+      if (isEdit) {
+        setEditActivityForm(prev => ({ ...prev, attachment }));
+      } else {
+        setNewActivity(prev => ({ ...prev, attachment }));
+      }
+      setIsAttachmentUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const downloadAttachment = (attachment: Activity['attachment']) => {
+    if (!attachment) return;
+    const link = document.createElement('a');
+    link.href = attachment.base64;
+    link.download = attachment.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const openEditActivityModal = (activity: Activity) => {
     setActivityToEdit(activity);
     setEditActivityForm({
       date: activity.date?.toDate().toISOString().split('T')[0] || '',
+      category: activity.category || 'Peksos',
       classActivity: activity.classActivity,
-      results: activity.results
+      results: activity.results,
+      attachment: activity.attachment || null
     });
   };
 
@@ -235,15 +389,20 @@ export default function StudentDetail() {
     doc.text(activities.length.toString(), 50, 66);
     
     // Table
-    const tableData = activities.map(activity => [
+    const filteredForPDF = activeCategory === 'Semua' 
+      ? activities 
+      : activities.filter(a => a.category === activeCategory);
+
+    const tableData = filteredForPDF.map(activity => [
       activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }),
+      activity.category?.toUpperCase() || '-',
       activity.classActivity,
       activity.results
     ]);
 
     autoTable(doc, {
       startY: 75,
-      head: [['TANGGAL', 'KEGIATAN KELAS', 'HASIL KEGIATAN']],
+      head: [['TANGGAL', 'KATEGORI', 'KEGIATAN KELAS', 'HASIL KEGIATAN']],
       body: tableData,
       theme: 'grid',
       headStyles: { 
@@ -260,8 +419,9 @@ export default function StudentDetail() {
       },
       columnStyles: {
         0: { cellWidth: 30, halign: 'center' },
-        1: { cellWidth: 'auto' },
-        2: { cellWidth: 'auto' }
+        1: { cellWidth: 25, halign: 'center' },
+        2: { cellWidth: 'auto' },
+        3: { cellWidth: 'auto' }
       },
       margin: { top: 75 }
     });
@@ -291,7 +451,7 @@ export default function StudentDetail() {
     return (
       <div className="flex flex-col items-center justify-center py-40 gap-4">
         <Loader2 className="w-12 h-12 text-indigo-600 animate-spin" />
-        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Menghubungkan ke Arsip Digital...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Menghubungkan ke Data Perkembangan PM...</p>
       </div>
     );
   }
@@ -328,6 +488,12 @@ export default function StudentDetail() {
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
           Kembali ke Daftar
         </button>
+        {error && (
+          <div className="bg-rose-50 border border-rose-100 px-4 py-2 rounded-xl flex items-center gap-2 text-rose-600 animate-pulse">
+            <AlertCircle size={14} />
+            <span className="text-[8px] font-black uppercase tracking-widest">{error}</span>
+          </div>
+        )}
         <div className="flex items-center gap-4">
           <button
             type="button"
@@ -386,50 +552,128 @@ export default function StudentDetail() {
         </div>
 
         {/* History Table Card */}
-        <div className="lg:col-span-8 bg-white border border-slate-200 rounded-[3rem] p-10 flex flex-col shadow-sm">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
+        <div className="lg:col-span-12 bg-white border border-slate-200 rounded-[3rem] p-10 flex flex-col shadow-sm">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3 shrink-0">
               <div className="w-2 h-8 bg-indigo-600 rounded-full" />
-              Riwayat Belajar PM
+              RIWAYAT PENERIMA MANFAAT
             </h3>
-            {activities.length > 0 && (
-              <button 
-                onClick={handleExportPDF}
-                className="flex items-center gap-2 text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-colors"
+            
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest px-6 py-2.5 rounded-full bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 shrink-0"
               >
-                <Download size={14} />
-                Export Report
+                <Plus size={14} />
+                Input Laporan
               </button>
-            )}
+
+              <button
+                onClick={handleConnectDrive}
+                disabled={isDriveConnecting}
+                className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${
+                  googleAccessToken 
+                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
+                    : 'bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100'
+                }`}
+              >
+                <Share2 size={14} className={isDriveConnecting ? 'animate-spin' : ''} />
+                {googleAccessToken ? 'Drive Aktif' : 'Hubungkan Drive'}
+              </button>
+
+              {activities.length > 0 && (
+                <button 
+                  onClick={handleExportPDF}
+                  className="flex items-center gap-2 text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-colors shrink-0"
+                >
+                  <Download size={14} />
+                  Export
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Category Tabs below Header */}
+          <div className="flex items-center gap-3 overflow-x-auto pb-6 no-scrollbar border-b border-slate-50 mb-8">
+            {['Semua', 'Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat as any)}
+                className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all border-2 ${
+                  activeCategory === cat 
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100' 
+                    : 'bg-white border-slate-100 text-slate-400 hover:border-indigo-100 hover:text-slate-600'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
           </div>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4">
-              <div className="col-span-3">Tanggal Kegiatan</div>
-              <div className="col-span-4">Kegiatan Kelas</div>
-              <div className="col-span-4">Hasil Kegiatan</div>
+            <div className={`grid ${activeCategory === 'Semua' ? 'grid-cols-12' : 'grid-cols-10'} gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4`}>
+              <div className="col-span-2">Tanggal</div>
+              {activeCategory === 'Semua' && <div className="col-span-2">Penyusun</div>}
+              <div className="col-span-3">Laporan</div>
+              <div className="col-span-3">Hasil Kegiatan</div>
+              <div className="col-span-1 text-center font-black">Berkas</div>
               <div className="col-span-1 text-right">Aksi</div>
             </div>
 
-            <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+            <div className="max-h-[500px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
               {loading ? (
                 <div className="text-center py-20 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memuat data...</div>
               ) : activities.length === 0 ? (
                 <div className="text-center py-20 text-[10px] font-black text-slate-300 uppercase tracking-widest italic">Belum ada data aktivitas terdaftar</div>
               ) : (
-                activities.map((activity, idx) => (
+                activities
+                  .filter(a => activeCategory === 'Semua' || a.category === activeCategory)
+                  .map((activity, idx) => (
                   <motion.div
                     key={activity.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    className="grid grid-cols-12 gap-4 py-5 px-4 border border-slate-50 rounded-2xl items-center hover:bg-slate-50 transition-all group"
+                    className={`grid ${activeCategory === 'Semua' ? 'grid-cols-12' : 'grid-cols-10'} gap-4 py-5 px-4 border border-slate-50 rounded-2xl items-center hover:bg-slate-50 transition-all group`}
                   >
-                    <div className="col-span-3 text-xs font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">
-                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase()}
+                    <div className="col-span-2 text-[11px] font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">
+                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
                     </div>
-                    <div className="col-span-4 text-[11px] text-slate-500 font-medium">{activity.classActivity}</div>
-                    <div className="col-span-4 text-[11px] text-indigo-600 font-bold italic">{activity.results}</div>
+                    {activeCategory === 'Semua' && (
+                      <div className="col-span-2">
+                        <span className="text-[8px] font-black px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg uppercase tracking-widest">
+                          {activity.category || 'Peksos'}
+                        </span>
+                      </div>
+                    )}
+                    <div className="col-span-3 text-[11px] text-slate-500 font-medium line-clamp-2">{activity.classActivity}</div>
+                    <div className="col-span-3 text-[11px] text-indigo-600 font-bold italic line-clamp-2">{activity.results}</div>
+                    <div className="col-span-1 flex items-center justify-center gap-2">
+                      {activity.attachment ? (
+                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                          <button 
+                            onClick={() => downloadAttachment(activity.attachment)}
+                            className="p-1.5 text-indigo-600 hover:bg-white hover:shadow-sm rounded-lg transition-all"
+                            title={`Unduh: ${activity.attachment.name}`}
+                          >
+                            <FileText size={16} />
+                          </button>
+                          {activity.attachment.driveViewLink && (
+                            <a 
+                              href={activity.attachment.driveViewLink} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="p-1.5 text-emerald-500 hover:bg-white hover:shadow-sm rounded-lg transition-all"
+                              title="Buka di Google Drive"
+                            >
+                              <ExternalLink size={14} />
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
+                    </div>
                     <div className="col-span-1 text-right flex items-center justify-end gap-1">
                       <button 
                         type="button"
@@ -453,63 +697,132 @@ export default function StudentDetail() {
           </div>
         </div>
 
-        {/* Daily Input Form Card */}
-        <div className="lg:col-span-4 bg-slate-900 rounded-[3rem] p-10 text-white flex flex-col shadow-2xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 rounded-full blur-3xl" />
-          
-          <h2 className="text-2xl font-black mb-8 tracking-tight uppercase flex items-center gap-3">
-            <Plus className="text-indigo-500" />
-            Input Harian
-          </h2>
-          
-          <form onSubmit={handleAddActivity} className="space-y-6 flex-1 flex flex-col">
-            <div>
-              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Tanggal Kegiatan</label>
-              <input
-                type="date"
-                required
-                value={newActivity.date}
-                onChange={e => setNewActivity({...newActivity, date: e.target.value})}
-                className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-bold text-white outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all uppercase tracking-widest"
-              />
-            </div>
-            
-            <div>
-              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Kegiatan Kelas</label>
-              <textarea
-                required
-                rows={3}
-                value={newActivity.classActivity}
-                onChange={e => setNewActivity({...newActivity, classActivity: e.target.value})}
-                className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans"
-                placeholder="Apa kegiatan di kelas hari ini?"
-              />
-            </div>
-            
-            <div>
-              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Hasil Kegiatan</label>
-              <textarea
-                required
-                rows={3}
-                value={newActivity.results}
-                onChange={e => setNewActivity({...newActivity, results: e.target.value})}
-                className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans"
-                placeholder="Bagaimana hasil kegiatannya?"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-5 bg-indigo-500 text-white rounded-[1.5rem] font-black text-xs uppercase tracking-[0.3em] hover:bg-indigo-400 transition-all shadow-xl shadow-indigo-500/20 mt-auto flex items-center justify-center gap-3 active:scale-95"
-            >
-              Kirim Data
-              <Send size={14} />
-            </button>
-          </form>
-        </div>
       </div>
       {/* Modals Section */}
       <AnimatePresence>
+        {/* Add Activity Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAddModal(false)}
+              className="absolute inset-0 bg-slate-900/80 backdrop-blur-md" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-slate-900 w-full max-w-xl rounded-[3rem] shadow-2xl p-10 overflow-hidden border border-white/10"
+            >
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 rounded-full blur-3xl" />
+              
+              <h2 className="text-2xl font-black mb-8 tracking-tight uppercase flex items-center gap-3 text-white">
+                <Plus className="text-indigo-500" />
+                Input Laporan
+              </h2>
+              
+              <form onSubmit={handleAddActivity} className="space-y-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Tanggal</label>
+                    <input
+                      type="date"
+                      required
+                      value={newActivity.date}
+                      onChange={e => setNewActivity({...newActivity, date: e.target.value})}
+                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-bold text-white outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all uppercase tracking-widest"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Penyusun</label>
+                    <select
+                      value={newActivity.category}
+                      onChange={e => setNewActivity({...newActivity, category: e.target.value as any})}
+                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-bold text-white outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all uppercase tracking-widest appearance-none"
+                    >
+                      {['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map(cat => (
+                        <option key={cat} value={cat} className="bg-slate-900 text-white">{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Laporan</label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={newActivity.classActivity}
+                    onChange={e => setNewActivity({...newActivity, classActivity: e.target.value})}
+                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans"
+                    placeholder="Apa laporan kegiatan hari ini?"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Hasil Kegiatan</label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={newActivity.results}
+                    onChange={e => setNewActivity({...newActivity, results: e.target.value})}
+                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans mb-4"
+                    placeholder="Bagaimana hasil kegiatannya?"
+                  />
+                </div>
+
+                {newActivity.category !== 'Instruktur' && (
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2 font-mono flex justify-between">
+                      Berkas Pendukung (Wajib)
+                      {newActivity.attachment && <span className="text-emerald-400">Terlampir</span>}
+                    </label>
+                    <div className="relative group/upload">
+                      <div className={`w-full px-5 py-4 border-2 border-dashed rounded-2xl transition-all flex items-center gap-4 ${newActivity.attachment ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-white/5 border-white/10 group-hover/upload:border-indigo-500/30'}`}>
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${newActivity.attachment ? 'bg-indigo-500 text-white' : 'bg-white/10 text-slate-400'}`}>
+                          {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                          <p className={`text-[10px] font-black uppercase tracking-widest truncate ${newActivity.attachment ? 'text-indigo-200' : 'text-slate-400'}`}>
+                            {newActivity.attachment ? newActivity.attachment.name : 'Pilih Berkas (DOCX/PDF/EXCEL)'}
+                          </p>
+                          <p className="text-[8px] font-black text-slate-500 uppercase">Max 500KB</p>
+                        </div>
+                      </div>
+                      <input
+                        type="file"
+                        required={newActivity.category !== 'Instruktur'}
+                        accept=".pdf,.docx,.xlsx,.xls"
+                        onChange={(e) => handleActivityFileChange(e)}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-4 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="flex-1 py-4 border border-white/10 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-white/5 transition-all"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-[2] py-4 bg-indigo-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:bg-indigo-400 transition-all shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-3 active:scale-95"
+                  >
+                    Kirim Data
+                    <Send size={14} />
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
         {/* Edit Activity Modal */}
         {activityToEdit && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -548,7 +861,19 @@ export default function StudentDetail() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Kegiatan Kelas</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Penyusun Laporan</label>
+                  <select
+                    value={editActivityForm.category}
+                    onChange={e => setEditActivityForm({...editActivityForm, category: e.target.value as any})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                  >
+                    {['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Laporan</label>
                   <textarea
                     required
                     rows={3}
@@ -567,6 +892,31 @@ export default function StudentDetail() {
                     className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-700 resize-none outline-none focus:ring-4 focus:ring-indigo-50 transition-all font-sans"
                   />
                 </div>
+
+                {editActivityForm.category !== 'Instruktur' && (
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Update Berkas Pendukung</label>
+                    <div className="relative group/editupload">
+                      <div className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-4">
+                        <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">
+                          {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-800 truncate">
+                            {editActivityForm.attachment ? editActivityForm.attachment.name : 'Dibutuhkan berkas baru'}
+                          </p>
+                          <p className="text-[8px] font-black text-slate-400 uppercase">DOCX, PDF, Excel | Max 500KB</p>
+                        </div>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".pdf,.docx,.xlsx,.xls"
+                        onChange={(e) => handleActivityFileChange(e, true)}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
                 
                 <div className="flex flex-col gap-3 pt-4">
                   <button

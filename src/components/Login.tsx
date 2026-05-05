@@ -5,8 +5,8 @@ import { motion } from 'motion/react';
 import { GraduationCap, ShieldCheck, Mail, Lock, AlertCircle } from 'lucide-react';
 
 export default function Login() {
-  const [email, setEmail] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,9 +78,9 @@ export default function Login() {
               <GraduationCap className="text-white w-10 h-10" strokeWidth={1.5} />
             </div>
 
-            <h1 className="text-3xl font-black text-slate-800 tracking-tighter uppercase mb-2 text-center">
-              Arsip Digital <br/>
-              <span className="text-indigo-600">PM PKBM</span>
+            <h1 className="text-3xl font-black text-slate-800 tracking-tighter uppercase mb-2 text-center leading-tight">
+              DATA PERKEMBANGAN<br/>
+              PENERIMA MANFAAT
             </h1>
             
             <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-10">
@@ -99,7 +99,7 @@ export default function Login() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="Masukkan email/username"
-                    className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:bg-white focus:border-indigo-600 outline-none transition-all"
+                    className="w-full bg-transparent border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:bg-white focus:border-indigo-600 outline-none transition-all"
                     required
                   />
                 </div>
@@ -116,7 +116,7 @@ export default function Login() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Masukkan password"
-                    className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:bg-white focus:border-indigo-600 outline-none transition-all"
+                    className="w-full bg-transparent border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:bg-white focus:border-indigo-600 outline-none transition-all"
                     required
                   />
                 </div>
@@ -147,12 +147,6 @@ export default function Login() {
               </button>
             </form>
 
-            <div className="mt-12 pt-8 border-t border-slate-50 w-full">
-              <div className="flex items-center justify-center gap-2 text-slate-300">
-                <ShieldCheck size={14} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Sistem Keamanan Terpadu</span>
-              </div>
-            </div>
           </div>
         </div>
       </motion.div>

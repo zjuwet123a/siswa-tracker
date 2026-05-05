@@ -36,11 +36,22 @@ service cloud.firestore {
 
     // Activity Validation
     function isValidActivity(data) {
-      return data.keys().hasAll(['studentId', 'date', 'classActivity', 'results', 'createdAt']) &&
+      return data.keys().hasAll(['studentId', 'date', 'category', 'classActivity', 'results', 'attachment', 'createdAt']) &&
              data.studentId is string && isValidId(data.studentId) &&
              data.date is timestamp &&
+             data.category in ['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'] &&
              data.classActivity is string && data.classActivity.size() > 0 && data.classActivity.size() <= 2000 &&
              data.results is string && data.results.size() > 0 && data.results.size() <= 2000 &&
+             (data.attachment == null || (
+               data.attachment is map &&
+               data.attachment.keys().hasAll(['name', 'type', 'base64']) &&
+               data.attachment.name is string &&
+               data.attachment.type is string &&
+               data.attachment.base64 is string &&
+               data.attachment.base64.size() <= 1000000 &&
+               (data.attachment.get('driveFileId', null) == null || data.attachment.driveFileId is string) &&
+               (data.attachment.get('driveViewLink', null) == null || data.attachment.driveViewLink is string)
+             )) &&
              data.createdAt is timestamp &&
              (data.get('updatedAt', null) == null || data.updatedAt is timestamp);
     }
