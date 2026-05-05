@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { BookOpen, Users, CheckCircle, Clock, BarChart3, ChevronRight } from 'lucide-react';
+import { Users, BarChart3, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
 
 function StatCard({ title, value, icon, color, delay, textColor = "text-slate-800" }: { title: string, value: string | number, icon: React.ReactNode, color: string, delay: number, textColor?: string }) {
@@ -49,7 +49,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <StatCard 
           title="Total Siswa" 
           value={stats.totalStudents} 
@@ -57,30 +57,6 @@ export default function Dashboard() {
           color="bg-indigo-600"
           textColor="text-white"
           delay={0}
-        />
-        <StatCard 
-          title="Sesi Belajar" 
-          value="4.2k" 
-          icon={<BookOpen className="text-white" size={24} />} 
-          color="bg-emerald-500"
-          textColor="text-white"
-          delay={0.1}
-        />
-        <StatCard 
-          title="Paham Rate" 
-          value="84%" 
-          icon={<CheckCircle className="text-slate-800" size={24} />} 
-          color="bg-amber-400"
-          textColor="text-slate-900"
-          delay={0.2}
-        />
-        <StatCard 
-          title="Growth" 
-          value="+12%" 
-          icon={<BarChart3 className="text-white" size={24} />} 
-          color="bg-slate-900"
-          textColor="text-white"
-          delay={0.3}
         />
       </div>
 
