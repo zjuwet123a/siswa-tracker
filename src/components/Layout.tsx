@@ -109,7 +109,8 @@ export default function Layout({ children }: LayoutProps) {
       const secondaryApp = getApps().find(app => app.name === 'Secondary') || initializeApp(firebaseConfig, 'Secondary');
       const secondaryAuth = getAuth(secondaryApp);
 
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newUserEmail, newUserPassword);
+      const finalEmail = newUserEmail.includes('@') ? newUserEmail : `${newUserEmail.trim().toLowerCase()}@pm.com`;
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, finalEmail, newUserPassword);
       
       // Update display name for the new user
       await updateProfile(userCredential.user, {
@@ -430,18 +431,19 @@ export default function Layout({ children }: LayoutProps) {
                   </div>
 
                   <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Email User</label>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Username / Email</label>
                     <div className="relative">
                       <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
                       <input
-                        type="email"
+                        type="text"
                         required
                         value={newUserEmail}
                         onChange={(e) => setNewUserEmail(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3.5 pl-12 pr-4 text-sm font-medium focus:bg-white focus:border-indigo-600 outline-none transition-all"
-                        placeholder="email@contoh.com"
+                        placeholder="contoh: user123 atau email@domain.com"
                       />
                     </div>
+                    <p className="text-[8px] text-slate-400 mt-1 ml-1 uppercase font-bold italic">* Jika hanya username, login akan menggunakan format username@pm.com</p>
                   </div>
 
                   <div>

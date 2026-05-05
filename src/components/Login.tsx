@@ -22,7 +22,7 @@ export default function Login() {
     }
 
     // Menangani masukan "admin" atau username lain agar valid secara format email Firebase
-    const finalEmail = email.includes('@') ? email : `${email}@pm.com`;
+    const finalEmail = email.includes('@') ? email.trim() : `${email.trim().toLowerCase()}@pm.com`;
 
     try {
       await signInWithEmailAndPassword(auth, finalEmail, password);
