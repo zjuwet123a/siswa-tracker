@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Student, Activity, UnderstandingStatus } from '../types';
+import { Student, Activity } from '../types';
 import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -15,16 +15,15 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
   const [loading, setLoading] = useState(true);
   const [newActivity, setNewActivity] = useState({
     date: new Date().toISOString().split('T')[0],
-    subject: '',
-    summary: '',
-    status: 'Paham' as UnderstandingStatus
+    classActivity: '',
+    results: ''
   });
 
   useEffect(() => {
     const q = query(
       collection(db, `students/${student.id}/activities`),
-      orderBy('date', 'desc'),
-      orderBy('createdAt', 'desc')
+      orderBy('date', 'asc'),
+      orderBy('createdAt', 'asc')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({
@@ -42,22 +41,20 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
 
   const handleAddActivity = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newActivity.subject || !newActivity.summary) return;
+    if (!newActivity.classActivity || !newActivity.results) return;
 
     try {
       await addDoc(collection(db, `students/${student.id}/activities`), {
         studentId: student.id,
         date: Timestamp.fromDate(new Date(newActivity.date)),
-        subject: newActivity.subject.trim(),
-        summary: newActivity.summary,
-        status: newActivity.status,
+        classActivity: newActivity.classActivity.trim(),
+        results: newActivity.results.trim(),
         createdAt: serverTimestamp()
       });
       setNewActivity({
         date: new Date().toISOString().split('T')[0],
-        subject: '',
-        summary: '',
-        status: 'Paham'
+        classActivity: '',
+        results: ''
       });
       alert('Data aktivitas berhasil disimpan!');
     } catch (error) {
@@ -90,10 +87,6 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
     }
   };
 
-  const pahamCount = activities.filter(a => a.status === 'Paham').length;
-  const reviewCount = activities.filter(a => a.status === 'Butuh Review').length;
-  const pahamPercentage = activities.length > 0 ? Math.round((pahamCount / activities.length) * 100) : 0;
-
   return (
     <div className="space-y-8">
       {/* Top Navigation */}
@@ -119,7 +112,7 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Profile Card */}
-        <div className="lg:col-span-8 bg-indigo-600 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl flex flex-col justify-between min-h-[300px]">
+        <div className="lg:col-span-12 bg-indigo-600 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl flex flex-col justify-between min-h-[300px]">
           <div className="absolute top-[-30px] right-[-30px] w-64 h-64 bg-white/10 rounded-full blur-3xl animate-pulse" />
           <div className="relative z-10">
             <span className="text-[10px] font-black text-indigo-200 uppercase tracking-[0.3em] mb-2 block">Viewing Profile</span>
@@ -131,29 +124,10 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
           
           <div className="relative z-10 flex gap-12 mt-10 border-t border-white/10 pt-8">
             <div className="space-y-1">
-              <p className="text-[9px] text-indigo-200 uppercase font-black tracking-widest opacity-60">Total Sesi</p>
+              <p className="text-[9px] text-indigo-200 uppercase font-black tracking-widest opacity-60">Total Sesi Belajar</p>
               <p className="text-3xl font-black">{activities.length}</p>
             </div>
-            <div className="space-y-1">
-              <p className="text-[9px] text-indigo-200 uppercase font-black tracking-widest opacity-60">Pemahaman</p>
-              <p className="text-3xl font-black">{pahamPercentage}%</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[9px] text-indigo-200 uppercase font-black tracking-widest opacity-60">Status</p>
-              <p className="text-3xl font-black italic">{pahamPercentage > 80 ? 'EXCELLENT' : 'ACTIVE'}</p>
-            </div>
           </div>
-        </div>
-
-        {/* Status Indicator Card */}
-        <div className={`lg:col-span-4 rounded-[3rem] p-10 flex flex-col items-center justify-center text-center shadow-xl transition-colors duration-500 ${pahamPercentage > 50 ? 'bg-emerald-500' : 'bg-amber-500'} text-white group`}>
-          <div className="w-24 h-24 rounded-full border-4 border-white/30 flex items-center justify-center mb-6 shadow-inner group-hover:scale-110 transition-transform">
-            <span className="text-2xl font-black italic tracking-tighter uppercase">{pahamPercentage > 50 ? 'Paham' : 'Review'}</span>
-          </div>
-          <p className="text-[10px] uppercase font-black tracking-[0.3em] opacity-80 mb-2">Current Academic Vibe</p>
-          <p className="text-xl font-bold leading-tight">
-            {pahamPercentage > 80 ? 'Highly Productive Session' : 'Consistent Learning Path'}
-          </p>
         </div>
 
         {/* History Table Card */}
@@ -168,15 +142,15 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
 
           <div className="space-y-4">
             <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4">
-              <div className="col-span-2">Tanggal</div>
-              <div className="col-span-3">Pelajaran</div>
-              <div className="col-span-4">Materi Summary</div>
-              <div className="col-span-3 text-right">Status</div>
+              <div className="col-span-3">Tanggal Kegiatan</div>
+              <div className="col-span-4">Kegiatan Kelas</div>
+              <div className="col-span-4">Hasil Kegiatan</div>
+              <div className="col-span-1 text-right">Aksi</div>
             </div>
 
             <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
               {loading ? (
-                <div className="text-center py-20 text-[10px] font-black text-slate-400 uppercase tracking-widest">Syncing with Cloud...</div>
+                <div className="text-center py-20 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memuat data...</div>
               ) : activities.length === 0 ? (
                 <div className="text-center py-20 text-[10px] font-black text-slate-300 uppercase tracking-widest italic">Belum ada data aktivitas terdaftar</div>
               ) : (
@@ -188,19 +162,12 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
                     transition={{ delay: idx * 0.05 }}
                     className="grid grid-cols-12 gap-4 py-5 px-4 border border-slate-50 rounded-2xl items-center hover:bg-slate-50 transition-all group"
                   >
-                    <div className="col-span-2 text-xs font-black text-slate-400 group-hover:text-indigo-600 transition-colors">
-                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }).toUpperCase()}
+                    <div className="col-span-3 text-xs font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">
+                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase()}
                     </div>
-                    <div className="col-span-3 text-sm font-black text-slate-800 uppercase tracking-tight">{activity.subject}</div>
-                    <div className="col-span-4 text-[11px] text-slate-500 font-medium truncate">{activity.summary}</div>
-                    <div className="col-span-3 text-right flex items-center justify-end gap-3">
-                      <span className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest shadow-sm ${
-                        activity.status === 'Paham' 
-                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
-                          : 'bg-amber-100 text-amber-700 border border-amber-200'
-                      }`}>
-                        {activity.status}
-                      </span>
+                    <div className="col-span-4 text-[11px] text-slate-500 font-medium">{activity.classActivity}</div>
+                    <div className="col-span-4 text-[11px] text-indigo-600 font-bold italic">{activity.results}</div>
+                    <div className="col-span-1 text-right">
                       <button 
                         type="button"
                         onClick={() => setActivityToDelete(activity)}
@@ -227,57 +194,38 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
           
           <form onSubmit={handleAddActivity} className="space-y-6 flex-1 flex flex-col">
             <div>
-              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Nama Pelajaran</label>
+              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Tanggal Kegiatan</label>
               <input
-                type="text"
+                type="date"
                 required
-                value={newActivity.subject}
-                onChange={e => setNewActivity({...newActivity, subject: e.target.value})}
+                value={newActivity.date}
+                onChange={e => setNewActivity({...newActivity, date: e.target.value})}
                 className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-bold text-white outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all uppercase tracking-widest"
-                placeholder="MISAL: KIMIA ORGANIK"
               />
             </div>
             
             <div>
-              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Ringkasan Materi</label>
+              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Kegiatan Kelas</label>
               <textarea
                 required
-                rows={5}
-                value={newActivity.summary}
-                onChange={e => setNewActivity({...newActivity, summary: e.target.value})}
-                className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all"
-                placeholder="Apa yang dipelajari hari ini?"
+                rows={3}
+                value={newActivity.classActivity}
+                onChange={e => setNewActivity({...newActivity, classActivity: e.target.value})}
+                className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans"
+                placeholder="Apa kegiatan di kelas hari ini?"
               />
             </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Status Pemahaman</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewActivity({...newActivity, status: 'Paham'})}
-                    className={`py-3 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${
-                      newActivity.status === 'Paham' 
-                        ? 'bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
-                        : 'border-white/10 text-slate-400 hover:bg-white/5'
-                    }`}
-                  >
-                    PAHAM
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewActivity({...newActivity, status: 'Butuh Review'})}
-                    className={`py-3 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${
-                      newActivity.status === 'Butuh Review' 
-                        ? 'bg-amber-500 border-amber-500 text-white shadow-lg shadow-amber-500/20' 
-                        : 'border-white/10 text-slate-400 hover:bg-white/5'
-                    }`}
-                  >
-                    REVIEW
-                  </button>
-                </div>
-              </div>
+            
+            <div>
+              <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Hasil Kegiatan</label>
+              <textarea
+                required
+                rows={3}
+                value={newActivity.results}
+                onChange={e => setNewActivity({...newActivity, results: e.target.value})}
+                className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans"
+                placeholder="Bagaimana hasil kegiatannya?"
+              />
             </div>
 
             <button
@@ -312,8 +260,8 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
                 <Trash2 size={24} />
               </div>
               <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Hapus Catatan?</h3>
-              <p className="text-sm text-slate-500 mt-2 italic px-4">
-                "{activityToDelete.subject}"
+              <p className="text-sm text-slate-500 mt-2">
+                Hapus catatan kegiatan ini?
               </p>
               <div className="grid grid-cols-2 gap-3 mt-8">
                 <button

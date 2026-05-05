@@ -1,5 +1,5 @@
 {
-  "name": "Student Activity Tracker",
+  "name": "PMTracker",
   "description": "A comprehensive student management system to track study progress, lesson summaries, and understanding levels using Firebase.",
   "requestFramePermissions": [],
   "majorCapabilities": []

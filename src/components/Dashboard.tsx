@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, collectionGroup } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Users, BarChart3, ChevronRight } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Users, BarChart3, ChevronRight, Clock, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Activity, Student } from '../types';
 
 function StatCard({ title, value, icon, color, delay, textColor = "text-slate-800" }: { title: string, value: string | number, icon: React.ReactNode, color: string, delay: number, textColor?: string }) {
   return (
@@ -30,71 +31,155 @@ export default function Dashboard() {
   const [stats, setStats] = useState({
     totalStudents: 0,
   });
+  const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
+  const [studentsMap, setStudentsMap] = useState<Record<string, Student>>({});
 
   useEffect(() => {
+    // Listen to students for stats and lookup
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
       setStats({ totalStudents: snap.size });
+      const map: Record<string, Student> = {};
+      snap.docs.forEach(doc => {
+        map[doc.id] = { id: doc.id, ...doc.data() } as Student;
+      });
+      setStudentsMap(map);
     }, (error) => {
-      console.error('Dashboard listener failed:', error);
+      console.error('Dashboard students sync failed:', error);
     });
-    return () => unsubStudents();
+
+    // Listen to recent activities across all students
+    const qActivities = query(
+      collectionGroup(db, 'activities'),
+      orderBy('date', 'desc'),
+      orderBy('createdAt', 'desc'),
+      limit(10)
+    );
+
+    const unsubActivities = onSnapshot(qActivities, (snap) => {
+      const activities = snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Activity[];
+      setRecentActivities(activities);
+    }, (error) => {
+      console.error('Dashboard activities sync failed:', error);
+    });
+
+    return () => {
+      unsubStudents();
+      unsubActivities();
+    };
   }, []);
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">Ringkasan Sistem</h2>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">Live Node Status: Active</p>
+          <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">Dashboard PM</h2>
+          <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Global Overview & Recent Sessions</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <StatCard 
-          title="Total Siswa" 
+          title="Total Siswa Terdaftar" 
           value={stats.totalStudents} 
           icon={<Users className="text-white" size={24} />} 
           color="bg-indigo-600"
           textColor="text-white"
           delay={0}
         />
+        <StatCard 
+          title="Sesi PM Terbaru" 
+          value={recentActivities.length} 
+          icon={<Clock className="text-white" size={24} />} 
+          color="bg-emerald-500"
+          textColor="text-white"
+          delay={0.1}
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[500px]">
-        <div className="lg:col-span-8 bg-white border border-slate-200 rounded-[3rem] p-10 flex flex-col shadow-sm">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Recent Activities List */}
+        <div className="lg:col-span-12 bg-white border border-slate-200 rounded-[3rem] p-10 flex flex-col shadow-sm">
           <div className="flex items-center justify-between mb-8">
             <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
-              <div className="w-2 h-8 bg-indigo-600 rounded-full" />
-              Performa Belajar Mingguan
+              <div className="w-2 h-8 bg-emerald-500 rounded-full" />
+              Kegiatan PM Terbaru
             </h3>
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] bg-slate-50 px-3 py-1 rounded-full">Report: v2.4</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] bg-slate-50 px-3 py-1 rounded-full">REALTIME UPDATE</span>
           </div>
-          <div className="flex-1 flex items-center justify-center bg-slate-50 rounded-[2.5rem] border border-dashed border-slate-200 group hover:bg-slate-100/50 transition-colors">
-            <div className="text-center">
-              <div className="inline-flex p-4 rounded-3xl bg-white shadow-sm mb-4 text-slate-300">
-                <BarChart3 size={40} />
-              </div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest max-w-[200px] mx-auto leading-relaxed">Grafik analytics akan muncul secara otomatis saat data telah terakumulasi.</p>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4 mr-2">
+              <div className="col-span-2">Siswa</div>
+              <div className="col-span-2">Tanggal</div>
+              <div className="col-span-4">Kegiatan Kelas</div>
+              <div className="col-span-4">Hasil / Insight</div>
+            </div>
+
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-2 custom-scrollbar">
+              <AnimatePresence mode="popLayout">
+                {recentActivities.map((activity, idx) => (
+                  <motion.div
+                    key={activity.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ delay: idx * 0.1 }}
+                    className="grid grid-cols-12 gap-4 py-6 px-6 bg-slate-50/50 hover:bg-white border border-transparent hover:border-slate-200 rounded-[2rem] items-center transition-all group"
+                  >
+                    <div className="col-span-2 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
+                        <User size={14} />
+                      </div>
+                      <div className="text-[11px] font-black text-slate-800 uppercase truncate">
+                        {studentsMap[activity.studentId]?.name || 'Unknown Student'}
+                      </div>
+                    </div>
+                    <div className="col-span-2 text-[10px] font-black text-slate-400">
+                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }).toUpperCase()}
+                    </div>
+                    <div className="col-span-4 text-[11px] text-slate-600 font-medium line-clamp-2">
+                      {activity.classActivity}
+                    </div>
+                    <div className="col-span-4 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50">
+                      <p className="text-[10px] font-bold text-indigo-600 italic line-clamp-2">
+                        {activity.results}
+                      </p>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              {recentActivities.length === 0 && (
+                <div className="py-20 text-center">
+                  <div className="inline-flex p-6 rounded-full bg-slate-50 text-slate-300 mb-4 border border-dashed border-slate-200">
+                    <Clock size={32} />
+                  </div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Belum ada kegiatan PM tercatat.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="lg:col-span-4 bg-indigo-600 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl flex flex-col justify-between group">
-          <div className="absolute top-[-40px] right-[-40px] w-64 h-64 bg-white/10 rounded-full blur-3xl group-hover:bg-white/20 transition-all duration-700" />
-          <div className="absolute bottom-[-20px] left-[-20px] w-32 h-32 bg-white/5 rounded-full blur-2xl" />
+        {/* Info Card */}
+        <div className="lg:col-span-12 bg-indigo-600 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl flex flex-col md:flex-row items-center justify-between group">
+          <div className="absolute top-[-40px] right-[-40px] w-64 h-64 bg-white/10 rounded-full blur-3xl" />
           
           <div className="relative z-10 flex-1">
-            <span className="text-[10px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-6 block">Quick Action</span>
-            <h3 className="text-3xl font-black leading-tight mb-4 tracking-tight uppercase">Update <br/>Record Siswa</h3>
-            <p className="text-sm font-medium text-indigo-100/80 leading-relaxed max-w-[200px]">
-              Pantau dan catat setiap progres belajar siswa secara langsung melalui portal Firebase.
+            <span className="text-[10px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-4 block">System Portal</span>
+            <h3 className="text-3xl font-black leading-tight mb-2 tracking-tight uppercase">Update Record Siswa</h3>
+            <p className="text-sm font-medium text-indigo-100/80 leading-relaxed max-w-lg">
+              Klik menu Siswa untuk mengelola data individu, menambah sesi PM baru, atau menghapus riwayat yang tidak diperlukan.
             </p>
           </div>
           
-          <div className="relative z-10 pt-8">
-            <div className="inline-flex items-center gap-3 bg-white/10 backdrop-blur-md px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-white hover:text-indigo-600 transition-all cursor-pointer">
-              Go To Directory
-              <ChevronRight size={14} />
+          <div className="relative z-10 mt-8 md:mt-0">
+            <div className="inline-flex items-center gap-3 bg-white text-indigo-600 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all cursor-pointer shadow-xl">
+              Lihat Daftar Siswa
+              <ChevronRight size={16} />
             </div>
           </div>
         </div>

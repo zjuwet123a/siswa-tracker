@@ -18,12 +18,11 @@
       "properties": {
         "studentId": { "type": "string", "description": "Reference to the student ID" },
         "date": { "type": "string", "format": "date-time", "description": "The date of the learning activity" },
-        "subject": { "type": "string", "description": "The subject name" },
-        "summary": { "type": "string", "description": "A summary of the lesson" },
-        "status": { "type": "string", "enum": ["Paham", "Butuh Review"], "description": "Understanding status" },
+        "classActivity": { "type": "string", "description": "The activity performed in class" },
+        "results": { "type": "string", "description": "The results or outcome of the activity" },
         "createdAt": { "type": "string", "format": "date-time", "description": "When the record was created" }
       },
-      "required": ["studentId", "date", "subject", "summary", "status", "createdAt"]
+      "required": ["studentId", "date", "classActivity", "results", "createdAt"]
     }
   },
   "firestore": {

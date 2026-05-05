@@ -16,9 +16,8 @@ export default function Layout({ children, activeTab, onTabChange }: LayoutProps
         <div className="text-center md:text-left">
           <h1 className="text-2xl md:text-3xl font-black tracking-tight text-indigo-600 uppercase flex items-center gap-3 justify-center md:justify-start">
             <GraduationCap className="w-8 h-8" />
-            Student Activity Tracker
+            PMTracker
           </h1>
-          <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Firebase Instance: Edu-Tracker-v1</p>
         </div>
         
         <div className="flex items-center gap-3">
@@ -44,11 +43,6 @@ export default function Layout({ children, activeTab, onTabChange }: LayoutProps
               Siswa
             </button>
           </nav>
-
-          <div className="hidden sm:flex px-4 py-2 bg-white border border-slate-200 rounded-full items-center gap-2 shadow-sm">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">System Online</span>
-          </div>
         </div>
       </header>
 

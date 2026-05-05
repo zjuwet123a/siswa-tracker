@@ -7,14 +7,11 @@ export interface Student {
   createdAt: Timestamp;
 }
 
-export type UnderstandingStatus = 'Paham' | 'Butuh Review';
-
 export interface Activity {
   id: string;
   studentId: string;
   date: Timestamp;
-  subject: string;
-  summary: string;
-  status: UnderstandingStatus;
+  classActivity: string;
+  results: string;
   createdAt: Timestamp;
 }

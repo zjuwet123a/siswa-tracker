@@ -80,7 +80,6 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">Siswa Terdaftar</h2>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">Management Portal • Database Direct</p>
         </div>
         <button
           onClick={() => setShowAddForm(true)}
@@ -115,7 +114,7 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
       {/* Student Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {loading ? (
-          <div className="col-span-full py-24 text-center text-slate-400 font-black uppercase tracking-widest text-[10px]">Menghubungkan ke Firebase...</div>
+          <div className="col-span-full py-24 text-center text-slate-400 font-black uppercase tracking-widest text-[10px]">Memuat data dari database...</div>
         ) : filteredStudents.length === 0 ? (
           <div className="col-span-full py-24 text-center text-slate-400 font-black uppercase tracking-widest text-[10px]">Tidak ada data ditemukan</div>
         ) : (
@@ -133,9 +132,6 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
                   <GraduationCap size={24} />
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <div className="px-3 py-1 bg-slate-50 text-slate-400 text-[8px] font-black rounded-full uppercase tracking-[0.2em] group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                    Cloud Active
-                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
