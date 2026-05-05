@@ -12,11 +12,15 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128;
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
       return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
     }
 
     // Student Validation
@@ -24,36 +28,43 @@ service cloud.firestore {
       return data.keys().hasAll(['name', 'enrollmentDate', 'createdAt']) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.enrollmentDate is timestamp &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             (data.get('photoUrl', null) == null || (data.photoUrl is string && data.photoUrl.size() <= 1000000)) &&
+             (data.get('vocation', null) == null || (data.vocation is string && data.vocation.size() <= 100)) &&
+             (data.get('updatedAt', null) == null || data.updatedAt is timestamp);
     }
 
     // Activity Validation
     function isValidActivity(data) {
       return data.keys().hasAll(['studentId', 'date', 'classActivity', 'results', 'createdAt']) &&
-             data.studentId is string && 
+             data.studentId is string && isValidId(data.studentId) &&
              data.date is timestamp &&
              data.classActivity is string && data.classActivity.size() > 0 && data.classActivity.size() <= 2000 &&
              data.results is string && data.results.size() > 0 && data.results.size() <= 2000 &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             (data.get('updatedAt', null) == null || data.updatedAt is timestamp);
     }
 
     match /students/{studentId} {
-      allow read: if true;
-      allow create: if isValidStudent(incoming());
-      allow update: if isValidStudent(incoming()) && (incoming().createdAt == resource.data.createdAt);
-      allow delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidStudent(incoming());
+      allow update: if isSignedIn() && isValidStudent(incoming()) && 
+                    incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn();
     }
 
     match /students/{studentId}/activities/{activityId} {
-      allow read: if true;
-      allow create: if isValidActivity(incoming()) && (incoming().studentId == studentId);
-      allow update: if isValidActivity(incoming()) && (incoming().studentId == studentId) && (incoming().createdAt == resource.data.createdAt);
-      allow delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidActivity(incoming()) && (incoming().studentId == studentId);
+      allow update: if isSignedIn() && isValidActivity(incoming()) && 
+                    (incoming().studentId == studentId) && 
+                    (incoming().createdAt == existing().createdAt);
+      allow delete: if isSignedIn();
     }
 
-    // Allow collection group queries for activities
+    // Collection group for dashboard stats
     match /{path=**}/activities/{activityId} {
-      allow read: if true;
+      allow read: if isSignedIn();
     }
   }
 }

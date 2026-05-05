@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, orderBy, limit, collectionGroup } from '
 import { db } from '../lib/firebase';
 import { Users, BarChart3, ChevronRight, Clock, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Link } from 'react-router-dom';
 import { Activity, Student } from '../types';
 
 function StatCard({ title, value, icon, color, delay, textColor = "text-slate-800" }: { title: string, value: string | number, icon: React.ReactNode, color: string, delay: number, textColor?: string }) {
@@ -27,7 +28,7 @@ function StatCard({ title, value, icon, color, delay, textColor = "text-slate-80
   );
 }
 
-export default function Dashboard({ onNavigateToStudents }: { onNavigateToStudents: () => void }) {
+export default function Dashboard() {
   const [stats, setStats] = useState({
     totalStudents: 0,
     totalActivities: 0,
@@ -184,14 +185,13 @@ export default function Dashboard({ onNavigateToStudents }: { onNavigateToStuden
           </div>
           
           <div className="relative z-10 mt-8 md:mt-0">
-            <button 
-              type="button"
-              onClick={onNavigateToStudents}
+            <Link 
+              to="/penerima-manfaat"
               className="inline-flex items-center gap-3 bg-white text-indigo-600 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all cursor-pointer shadow-xl"
             >
               Lihat Daftar PM
               <ChevronRight size={16} />
-            </button>
+            </Link>
           </div>
         </div>
       </div>

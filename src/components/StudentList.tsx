@@ -2,18 +2,47 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Student } from '../types';
-import { UserPlus, Search, ChevronRight, GraduationCap, Trash2 } from 'lucide-react';
+import { UserPlus, Search, ChevronRight, GraduationCap, Trash2, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 
-interface StudentListProps {
-  onSelectStudent: (student: Student) => void;
-}
-
-export default function StudentList({ onSelectStudent }: StudentListProps) {
+export default function StudentList() {
+  const navigate = useNavigate();
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newStudent, setNewStudent] = useState({ name: '', vocation: '', enrollmentDate: new Date().toISOString().split('T')[0] });
+  const [newStudent, setNewStudent] = useState({ name: '', vocation: '', enrollmentDate: new Date().toISOString().split('T')[0], photoUrl: '' });
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!validTypes.includes(file.type)) {
+      alert('Format file harus JPG, JPEG, atau PNG');
+      return;
+    }
+
+    // Validate size (500KB)
+    if (file.size > 500 * 1024) {
+      alert('Ukuran file maksimal 500KB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadstart = () => setIsUploading(true);
+    reader.onload = (event) => {
+      setNewStudent(prev => ({ ...prev, photoUrl: event.target?.result as string }));
+      setIsUploading(false);
+    };
+    reader.onerror = () => {
+      alert('Gagal membaca file');
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 6;
@@ -44,10 +73,11 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
         name: newStudent.name.trim(),
         vocation: newStudent.vocation.trim(),
         enrollmentDate: Timestamp.fromDate(new Date(newStudent.enrollmentDate)),
+        photoUrl: newStudent.photoUrl || null,
         createdAt: serverTimestamp()
       });
       console.log('Student added with ID:', docRef.id);
-      setNewStudent({ name: '', vocation: '', enrollmentDate: new Date().toISOString().split('T')[0] });
+      setNewStudent({ name: '', vocation: '', enrollmentDate: new Date().toISOString().split('T')[0], photoUrl: '' });
       setShowAddForm(false);
       alert('Data berhasil disimpan!');
     } catch (error) {
@@ -146,12 +176,16 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: idx * 0.05 }}
-              onClick={() => onSelectStudent(student)}
+              onClick={() => navigate(`/profile/${student.id}`)}
               className="group cursor-pointer bg-white border border-slate-200 p-8 rounded-[2.5rem] shadow-sm hover:shadow-2xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between h-64 border-b-4 border-b-transparent hover:border-b-indigo-600"
             >
               <div className="flex justify-between items-start mb-6">
-                <div className="bg-slate-50 text-slate-400 p-3 rounded-2xl group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300 group-hover:rotate-6">
-                  <GraduationCap size={24} />
+                <div className="bg-slate-50 text-slate-400 p-0 rounded-2xl group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-all duration-300 group-hover:rotate-3 overflow-hidden w-12 h-12 flex items-center justify-center">
+                  {student.photoUrl ? (
+                    <img src={student.photoUrl} alt={student.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <User size={24} strokeWidth={1.5} />
+                  )}
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <button
@@ -282,6 +316,46 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
               </div>
 
               <form onSubmit={handleAddStudent} className="space-y-5">
+                <div className="flex flex-col items-center">
+                  <label className="label-bento text-center">FOTO PROFIL (MAX 500KB)</label>
+                  <div className="mt-2 relative group/photo">
+                    <div className="w-24 h-24 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden transition-all group-hover/photo:border-indigo-300">
+                      {newStudent.photoUrl ? (
+                        <img src={newStudent.photoUrl} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <div className="text-slate-300 flex flex-col items-center gap-1">
+                          <UserPlus size={24} />
+                          <span className="text-[8px] font-black uppercase">Upload</span>
+                        </div>
+                      )}
+                      {isUploading && (
+                        <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                          <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/png, image/jpeg, image/jpg"
+                      onChange={handleFileChange}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      title="Pilih foto profil"
+                    />
+                    {newStudent.photoUrl && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setNewStudent(prev => ({ ...prev, photoUrl: '' }));
+                        }}
+                        className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-rose-600 transition-all scale-0 group-hover/photo:scale-100"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div>
                   <label className="label-bento">NAMA LENGKAP</label>
                   <input

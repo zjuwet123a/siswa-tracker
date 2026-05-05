@@ -5,6 +5,7 @@ export interface Student {
   name: string;
   vocation?: string;
   enrollmentDate: Timestamp;
+  photoUrl?: string;
   createdAt: Timestamp;
 }
 
