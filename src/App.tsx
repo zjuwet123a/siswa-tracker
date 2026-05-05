@@ -21,11 +21,11 @@ export default function App() {
 
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onNavigateToStudents={() => setActiveTab('students')} />;
       case 'students':
         return <StudentList onSelectStudent={(student) => setSelectedStudent(student)} />;
       default:
-        return <Dashboard />;
+        return <Dashboard onNavigateToStudents={() => setActiveTab('students')} />;
     }
   };
 

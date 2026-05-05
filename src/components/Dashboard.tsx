@@ -27,9 +27,10 @@ function StatCard({ title, value, icon, color, delay, textColor = "text-slate-80
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onNavigateToStudents }: { onNavigateToStudents: () => void }) {
   const [stats, setStats] = useState({
     totalStudents: 0,
+    totalActivities: 0,
   });
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [studentsMap, setStudentsMap] = useState<Record<string, Student>>({});
@@ -37,7 +38,7 @@ export default function Dashboard() {
   useEffect(() => {
     // Listen to students for stats and lookup
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
-      setStats({ totalStudents: snap.size });
+      setStats(prev => ({ ...prev, totalStudents: snap.size }));
       const map: Record<string, Student> = {};
       snap.docs.forEach(doc => {
         map[doc.id] = { id: doc.id, ...doc.data() } as Student;
@@ -45,6 +46,13 @@ export default function Dashboard() {
       setStudentsMap(map);
     }, (error) => {
       console.error('Dashboard students sync failed:', error);
+    });
+
+    // Listen to total activities count
+    const unsubTotalActivities = onSnapshot(collectionGroup(db, 'activities'), (snap) => {
+      setStats(prev => ({ ...prev, totalActivities: snap.size }));
+    }, (error) => {
+      console.error('Dashboard total activities sync failed:', error);
     });
 
     // Listen to recent activities across all students
@@ -67,6 +75,7 @@ export default function Dashboard() {
 
     return () => {
       unsubStudents();
+      unsubTotalActivities();
       unsubActivities();
     };
   }, []);
@@ -76,13 +85,12 @@ export default function Dashboard() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">Dashboard PM</h2>
-          <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Global Overview & Recent Sessions</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <StatCard 
-          title="Total Siswa Terdaftar" 
+          title="TOTAL PENERIMA MANFAAT" 
           value={stats.totalStudents} 
           icon={<Users className="text-white" size={24} />} 
           color="bg-indigo-600"
@@ -90,8 +98,8 @@ export default function Dashboard() {
           delay={0}
         />
         <StatCard 
-          title="Sesi PM Terbaru" 
-          value={recentActivities.length} 
+          title="JUMLAH KEGIATAN PENERIMA MANFAAT VOKASIONAL" 
+          value={stats.totalActivities} 
           icon={<Clock className="text-white" size={24} />} 
           color="bg-emerald-500"
           textColor="text-white"
@@ -112,7 +120,7 @@ export default function Dashboard() {
 
           <div className="space-y-4">
             <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4 mr-2">
-              <div className="col-span-2">Siswa</div>
+              <div className="col-span-2">Penerima Manfaat</div>
               <div className="col-span-2">Tanggal</div>
               <div className="col-span-4">Kegiatan Kelas</div>
               <div className="col-span-4">Hasil / Insight</div>
@@ -138,7 +146,7 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="col-span-2 text-[10px] font-black text-slate-400">
-                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }).toUpperCase()}
+                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}
                     </div>
                     <div className="col-span-4 text-[11px] text-slate-600 font-medium line-clamp-2">
                       {activity.classActivity}
@@ -169,18 +177,21 @@ export default function Dashboard() {
           <div className="absolute top-[-40px] right-[-40px] w-64 h-64 bg-white/10 rounded-full blur-3xl" />
           
           <div className="relative z-10 flex-1">
-            <span className="text-[10px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-4 block">System Portal</span>
-            <h3 className="text-3xl font-black leading-tight mb-2 tracking-tight uppercase">Update Record Siswa</h3>
-            <p className="text-sm font-medium text-indigo-100/80 leading-relaxed max-w-lg">
-              Klik menu Siswa untuk mengelola data individu, menambah sesi PM baru, atau menghapus riwayat yang tidak diperlukan.
+            <h3 className="text-3xl font-black leading-tight mb-2 tracking-tight uppercase">UPDATE AKTIFITAS PENERIMA MANFAAT</h3>
+            <p className="text-sm font-medium text-indigo-100/80 leading-relaxed max-w-2xl">
+              Klik menu Penerima Manfaat untuk mengelola data individu, menambah kegiatan baru, atau menghapus riwayat kegiatan Penerima Manfaat yang tidak diperlukan.
             </p>
           </div>
           
           <div className="relative z-10 mt-8 md:mt-0">
-            <div className="inline-flex items-center gap-3 bg-white text-indigo-600 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all cursor-pointer shadow-xl">
-              Lihat Daftar Siswa
+            <button 
+              type="button"
+              onClick={onNavigateToStudents}
+              className="inline-flex items-center gap-3 bg-white text-indigo-600 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all cursor-pointer shadow-xl"
+            >
+              Lihat Daftar PM
               <ChevronRight size={16} />
-            </div>
+            </button>
           </div>
         </div>
       </div>

@@ -13,8 +13,10 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newStudent, setNewStudent] = useState({ name: '', enrollmentDate: new Date().toISOString().split('T')[0] });
+  const [newStudent, setNewStudent] = useState({ name: '', vocation: '', enrollmentDate: new Date().toISOString().split('T')[0] });
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 6;
 
   useEffect(() => {
     const q = query(collection(db, 'students'), orderBy('createdAt', 'desc'));
@@ -40,13 +42,14 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
       console.log('Adding student...', newStudent);
       const docRef = await addDoc(collection(db, 'students'), {
         name: newStudent.name.trim(),
+        vocation: newStudent.vocation.trim(),
         enrollmentDate: Timestamp.fromDate(new Date(newStudent.enrollmentDate)),
         createdAt: serverTimestamp()
       });
       console.log('Student added with ID:', docRef.id);
-      setNewStudent({ name: '', enrollmentDate: new Date().toISOString().split('T')[0] });
+      setNewStudent({ name: '', vocation: '', enrollmentDate: new Date().toISOString().split('T')[0] });
       setShowAddForm(false);
-      alert('Data siswa berhasil disimpan!');
+      alert('Data berhasil disimpan!');
     } catch (error) {
       console.error('Add student failed:', error);
       alert('Gagal menyimpan data: ' + (error instanceof Error ? error.message : 'Unknown error'));
@@ -72,21 +75,40 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
   };
 
   const filteredStudents = students.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase())
+    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (s.vocation && s.vocation.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
+  const paginatedStudents = filteredStudents.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const uniqueVocations = Array.from(
+    new Set(
+      students
+        .map(s => s.vocation?.trim())
+        .filter((v): v is string => !!v && v !== '')
+    )
+  ).sort();
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">Siswa Terdaftar</h2>
+          <h2 className="text-3xl font-black tracking-tight text-slate-900 uppercase">Penerima Manfaat Terdaftar</h2>
         </div>
         <button
           onClick={() => setShowAddForm(true)}
           className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl shadow-indigo-100 active:scale-95"
         >
           <UserPlus size={16} />
-          Tambah Siswa Baru
+          Tambah Penerima Manfaat Baru
         </button>
       </div>
 
@@ -96,17 +118,17 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
           <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
             type="text"
-            placeholder="CARI NAMA ATAU JENJANG..."
+            placeholder="CARI NAMA ATAU VOKASIONAL..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-16 pr-8 py-4.5 bg-white border border-slate-200 rounded-[2rem] focus:ring-4 focus:ring-indigo-50 outline-none transition-all text-[11px] font-black uppercase tracking-widest text-slate-600 shadow-sm"
           />
         </div>
         <div className="md:col-span-4 bg-slate-900 rounded-[2rem] p-4 flex items-center justify-between px-8 shadow-xl">
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Database Size</span>
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">JUMLAH PENERIMA MANFAAT</span>
           <div className="flex items-baseline gap-1">
             <span className="text-3xl font-black text-white">{students.length}</span>
-            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Entries</span>
+            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">ORANG</span>
           </div>
         </div>
       </div>
@@ -115,10 +137,10 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {loading ? (
           <div className="col-span-full py-24 text-center text-slate-400 font-black uppercase tracking-widest text-[10px]">Memuat data dari database...</div>
-        ) : filteredStudents.length === 0 ? (
+        ) : paginatedStudents.length === 0 ? (
           <div className="col-span-full py-24 text-center text-slate-400 font-black uppercase tracking-widest text-[10px]">Tidak ada data ditemukan</div>
         ) : (
-          filteredStudents.map((student, idx) => (
+          paginatedStudents.map((student, idx) => (
             <motion.div
               key={student.id}
               initial={{ opacity: 0, scale: 0.95 }}
@@ -139,7 +161,7 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
                       setStudentToDelete(student);
                     }}
                     className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                    title="Hapus Siswa"
+                    title="Hapus Penerima Manfaat"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -148,6 +170,9 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
               
               <div>
                 <h4 className="text-2xl font-black text-slate-800 leading-tight mb-1 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">{student.name}</h4>
+                {student.vocation && (
+                  <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-2">{student.vocation}</p>
+                )}
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -157,7 +182,7 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
               </div>
 
               <div className="mt-8 flex items-center justify-between group-hover:translate-x-1 transition-transform duration-300">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Open Profile</span>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">BUKA PROFIL PENERIMA MANFAAT</span>
                 <div className="w-8 h-8 rounded-full border border-slate-100 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition-all">
                   <ChevronRight size={16} />
                 </div>
@@ -166,6 +191,28 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
           ))
         )}
       </div>
+
+      {/* Pagination */}
+      {!loading && totalPages > 1 && (
+        <div className="flex justify-center items-center gap-2 mt-8">
+          {[...Array(totalPages)].map((_, i) => (
+            <button
+              key={i + 1}
+              onClick={() => {
+                setCurrentPage(i + 1);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`w-10 h-10 rounded-xl text-[11px] font-black transition-all ${
+                currentPage === i + 1
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100'
+                  : 'bg-white border border-slate-200 text-slate-400 hover:border-indigo-600 hover:text-indigo-600'
+              }`}
+            >
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
@@ -187,7 +234,7 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
               <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Trash2 size={24} />
               </div>
-              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Hapus Siswa?</h3>
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Hapus Penerima Manfaat?</h3>
               <p className="text-sm text-slate-500 mt-2">
                 Apakah Anda yakin ingin menghapus <strong>{studentToDelete.name}</strong>? Data riwayat akan hilang selamanya.
               </p>
@@ -231,8 +278,7 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
                 <div className="w-16 h-16 bg-indigo-600 text-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 shadow-xl shadow-indigo-100">
                   <UserPlus size={32} />
                 </div>
-                <h3 className="text-2xl font-black tracking-tight text-slate-800 uppercase">Input Siswa</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">Data Registration Form</p>
+                <h3 className="text-2xl font-black tracking-tight text-slate-800 uppercase">Input Penerima Manfaat</h3>
               </div>
 
               <form onSubmit={handleAddStudent} className="space-y-5">
@@ -246,6 +292,22 @@ export default function StudentList({ onSelectStudent }: StudentListProps) {
                     className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
                     placeholder="Contoh: Budi Santoso"
                   />
+                </div>
+                <div>
+                  <label className="label-bento">KETERANGAN VOKASIONAL</label>
+                  <input
+                    type="text"
+                    list="vocation-list"
+                    value={newStudent.vocation}
+                    onChange={e => setNewStudent({...newStudent, vocation: e.target.value})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                    placeholder="Contoh: Menjahit, Tata Boga, dll"
+                  />
+                  <datalist id="vocation-list">
+                    {uniqueVocations.map(v => (
+                      <option key={v} value={v} />
+                    ))}
+                  </datalist>
                 </div>
                 <div>
                   <label className="label-bento">TANGGAL MASUK</label>

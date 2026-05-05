@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Student, Activity } from '../types';
-import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2 } from 'lucide-react';
+import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface StudentDetailProps {
   student: Student;
@@ -11,6 +13,7 @@ interface StudentDetailProps {
 }
 
 export default function StudentDetail({ student, onBack }: StudentDetailProps) {
+  const [localStudent, setLocalStudent] = useState<Student>(student);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [newActivity, setNewActivity] = useState({
@@ -20,12 +23,25 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
   });
 
   useEffect(() => {
+    // Listen to student document for real-time updates (name, vocation, etc)
+    const unsubscribeStudent = onSnapshot(doc(db, 'students', student.id), (snapshot) => {
+      if (snapshot.exists()) {
+        const studentData = { id: snapshot.id, ...snapshot.data() } as Student;
+        setLocalStudent(studentData);
+        setEditFormData({
+          name: studentData.name,
+          vocation: studentData.vocation || '',
+          enrollmentDate: studentData.enrollmentDate?.toDate().toISOString().split('T')[0] || ''
+        });
+      }
+    });
+
     const q = query(
       collection(db, `students/${student.id}/activities`),
       orderBy('date', 'asc'),
       orderBy('createdAt', 'asc')
     );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeActivities = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -36,7 +52,10 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
       handleFirestoreError(error, OperationType.GET, `student activities for ${student.id}`);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeStudent();
+      unsubscribeActivities();
+    };
   }, [student.id]);
 
   const handleAddActivity = async (e: React.FormEvent) => {
@@ -64,13 +83,72 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
   };
 
   const [activityToDelete, setActivityToDelete] = useState<Activity | null>(null);
+  const [activityToEdit, setActivityToEdit] = useState<Activity | null>(null);
+  const [editActivityForm, setEditActivityForm] = useState({
+    date: '',
+    classActivity: '',
+    results: ''
+  });
   const [showDeleteStudentModal, setShowDeleteStudentModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    name: localStudent.name,
+    vocation: localStudent.vocation || '',
+    enrollmentDate: localStudent.enrollmentDate?.toDate().toISOString().split('T')[0] || ''
+  });
+
+  const handleEditStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editFormData.name.trim()) return;
+
+    try {
+      await updateDoc(doc(db, 'students', localStudent.id), {
+        name: editFormData.name.trim(),
+        vocation: editFormData.vocation.trim(),
+        enrollmentDate: Timestamp.fromDate(new Date(editFormData.enrollmentDate)),
+        updatedAt: serverTimestamp()
+      });
+      setShowEditModal(false);
+      alert('Data berhasil diperbarui!');
+    } catch (error) {
+      alert('Gagal memperbarui data: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      handleFirestoreError(error, OperationType.UPDATE, `student ${localStudent.id}`);
+    }
+  };
+
+  const handleEditActivity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activityToEdit || !editActivityForm.classActivity || !editActivityForm.results) return;
+
+    try {
+      await updateDoc(doc(db, `students/${localStudent.id}/activities`, activityToEdit.id), {
+        date: Timestamp.fromDate(new Date(editActivityForm.date)),
+        classActivity: editActivityForm.classActivity.trim(),
+        results: editActivityForm.results.trim(),
+        updatedAt: serverTimestamp()
+      });
+      setActivityToEdit(null);
+      alert('Data aktivitas berhasil diperbarui!');
+    } catch (error) {
+      alert('Gagal memperbarui aktivitas: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      handleFirestoreError(error, OperationType.UPDATE, `activity ${activityToEdit.id}`);
+    }
+  };
+
+  const openEditActivityModal = (activity: Activity) => {
+    setActivityToEdit(activity);
+    setEditActivityForm({
+      date: activity.date?.toDate().toISOString().split('T')[0] || '',
+      classActivity: activity.classActivity,
+      results: activity.results
+    });
+  };
 
   const confirmDeleteActivity = async () => {
     if (!activityToDelete) return;
 
     try {
-      await deleteDoc(doc(db, `students/${student.id}/activities`, activityToDelete.id));
+      await deleteDoc(doc(db, `students/${localStudent.id}/activities`, activityToDelete.id));
       setActivityToDelete(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `activity ${activityToDelete.id}`);
@@ -79,12 +157,94 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
 
   const confirmDeleteStudent = async () => {
     try {
-      await deleteDoc(doc(db, 'students', student.id));
+      await deleteDoc(doc(db, 'students', localStudent.id));
       setShowDeleteStudentModal(false);
       onBack();
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `student ${student.id}`);
+      handleFirestoreError(error, OperationType.DELETE, `student ${localStudent.id}`);
     }
+  };
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.text('LAPORAN KEGIATAN', 14, 22);
+    doc.setFontSize(14);
+    doc.text('PENERIMA MANFAAT', 14, 30);
+    
+    // Line separator
+    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.line(14, 35, 196, 35);
+
+    // Profile Info
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139); // slate-500
+    doc.text('NAMA LENGKAP:', 14, 45);
+    doc.text('VOKASIONAL:', 14, 52);
+    doc.text('TANGGAL MASUK:', 14, 59);
+    doc.text('TOTAL SESI:', 14, 66);
+    
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.setFont('helvetica', 'bold');
+    doc.text(localStudent.name.toUpperCase(), 50, 45);
+    doc.text((localStudent.vocation || '-').toUpperCase(), 50, 52);
+    doc.text(localStudent.enrollmentDate?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase() || '-', 50, 59);
+    doc.text(activities.length.toString(), 50, 66);
+    
+    // Table
+    const tableData = activities.map(activity => [
+      activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }),
+      activity.classActivity,
+      activity.results
+    ]);
+
+    autoTable(doc, {
+      startY: 75,
+      head: [['TANGGAL', 'KEGIATAN KELAS', 'HASIL KEGIATAN']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { 
+        fillColor: [79, 70, 229], // indigo-600
+        textColor: [255, 255, 255], 
+        fontStyle: 'bold',
+        fontSize: 9,
+        halign: 'center'
+      },
+      styles: { 
+        fontSize: 8, 
+        cellPadding: 5,
+        valign: 'middle'
+      },
+      columnStyles: {
+        0: { cellWidth: 30, halign: 'center' },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 'auto' }
+      },
+      margin: { top: 75 }
+    });
+
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(
+        `Dicetak pada: ${new Date().toLocaleString('id-ID')}`,
+        14,
+        doc.internal.pageSize.height - 10
+      );
+      doc.text(
+        `Halaman ${i} dari ${pageCount}`,
+        doc.internal.pageSize.width - 40,
+        doc.internal.pageSize.height - 10
+      );
+    }
+
+    doc.save(`Laporan_${localStudent.name.replace(/\s+/g, '_')}.pdf`);
   };
 
   return (
@@ -98,14 +258,24 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
           Kembali ke Daftar
         </button>
-        <button
-          type="button"
-          onClick={() => setShowDeleteStudentModal(true)}
-          className="relative z-20 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-rose-400 hover:text-rose-600 transition-all px-4 py-2 rounded-xl"
-        >
-          <Trash2 size={16} />
-          Hapus Siswa
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setShowEditModal(true)}
+            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 hover:text-indigo-700 transition-all px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-100"
+          >
+            <Edit2 size={16} />
+            Edit Profile
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDeleteStudentModal(true)}
+            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-rose-400 hover:text-rose-600 transition-all px-4 py-2 rounded-xl"
+          >
+            <Trash2 size={16} />
+            Hapus Penerima Manfaat
+          </button>
+        </div>
       </div>
 
       {/* Bento Grid Layout */}
@@ -116,9 +286,14 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
           <div className="absolute top-[-30px] right-[-30px] w-64 h-64 bg-white/10 rounded-full blur-3xl animate-pulse" />
           <div className="relative z-10">
             <span className="text-[10px] font-black text-indigo-200 uppercase tracking-[0.3em] mb-2 block">Viewing Profile</span>
-            <h2 className="text-5xl font-black tracking-tighter uppercase mb-2">{student.name}</h2>
+            <h2 className="text-5xl font-black tracking-tighter uppercase mb-2">{localStudent.name}</h2>
+            {localStudent.vocation && (
+              <p className="text-sm font-black text-indigo-100 uppercase tracking-widest mb-4">
+                Vokasional: {localStudent.vocation}
+              </p>
+            )}
             <p className="text-lg font-medium text-indigo-100 opacity-80">
-              Masuk: {student.enrollmentDate?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+              Masuk: {localStudent.enrollmentDate?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
           </div>
           
@@ -135,9 +310,17 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
           <div className="flex justify-between items-center mb-8">
             <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
               <div className="w-2 h-8 bg-indigo-600 rounded-full" />
-              Riwayat Belajar Siswa
+              Riwayat Belajar PM
             </h3>
-            <button className="text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-colors">Export Report</button>
+            {activities.length > 0 && (
+              <button 
+                onClick={handleExportPDF}
+                className="flex items-center gap-2 text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-colors"
+              >
+                <Download size={14} />
+                Export Report
+              </button>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -167,7 +350,14 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
                     </div>
                     <div className="col-span-4 text-[11px] text-slate-500 font-medium">{activity.classActivity}</div>
                     <div className="col-span-4 text-[11px] text-indigo-600 font-bold italic">{activity.results}</div>
-                    <div className="col-span-1 text-right">
+                    <div className="col-span-1 text-right flex items-center justify-end gap-1">
+                      <button 
+                        type="button"
+                        onClick={() => openEditActivityModal(activity)}
+                        className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                      >
+                        <Edit2 size={14} />
+                      </button>
                       <button 
                         type="button"
                         onClick={() => setActivityToDelete(activity)}
@@ -240,6 +430,84 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
       </div>
       {/* Modals Section */}
       <AnimatePresence>
+        {/* Edit Activity Modal */}
+        {activityToEdit && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setActivityToEdit(null)}
+              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-10"
+            >
+              <div className="flex items-center gap-4 mb-8">
+                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center">
+                  <Edit2 size={24} />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Edit Kegiatan</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Ubah riwayat belajar ini</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleEditActivity} className="space-y-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Tanggal Kegiatan</label>
+                  <input
+                    type="date"
+                    required
+                    value={editActivityForm.date}
+                    onChange={e => setEditActivityForm({...editActivityForm, date: e.target.value})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Kegiatan Kelas</label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={editActivityForm.classActivity}
+                    onChange={e => setEditActivityForm({...editActivityForm, classActivity: e.target.value})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-700 resize-none outline-none focus:ring-4 focus:ring-indigo-50 transition-all font-sans"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Hasil Kegiatan</label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={editActivityForm.results}
+                    onChange={e => setEditActivityForm({...editActivityForm, results: e.target.value})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-700 resize-none outline-none focus:ring-4 focus:ring-indigo-50 transition-all font-sans"
+                  />
+                </div>
+                
+                <div className="flex flex-col gap-3 pt-4">
+                  <button
+                    type="submit"
+                    className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100"
+                  >
+                    Simpan Perubahan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivityToEdit(null)}
+                    className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 transition-all"
+                  >
+                    Batalkan
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
         {/* Delete Activity Modal */}
         {activityToDelete && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -281,6 +549,84 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
           </div>
         )}
 
+        {/* Edit Student Modal */}
+        {showEditModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowEditModal(false)}
+              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-10"
+            >
+              <div className="flex items-center gap-4 mb-8">
+                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center">
+                  <Edit2 size={24} />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Edit Profile</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Ubah Data Penerima Manfaat</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleEditStudent} className="space-y-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Nama Lengkap</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.name}
+                    onChange={e => setEditFormData({...editFormData, name: e.target.value})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Vokasional</label>
+                  <input
+                    type="text"
+                    value={editFormData.vocation}
+                    onChange={e => setEditFormData({...editFormData, vocation: e.target.value})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                    placeholder="Contoh: Menjahit, Tata Boga"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Tanggal Masuk</label>
+                  <input
+                    type="date"
+                    required
+                    value={editFormData.enrollmentDate}
+                    onChange={e => setEditFormData({...editFormData, enrollmentDate: e.target.value})}
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                  />
+                </div>
+                
+                <div className="flex flex-col gap-3 pt-4">
+                  <button
+                    type="submit"
+                    className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100"
+                  >
+                    Simpan Perubahan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowEditModal(false)}
+                    className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 transition-all"
+                  >
+                    Batalkan
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
         {/* Delete Student Modal */}
         {showDeleteStudentModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -300,9 +646,9 @@ export default function StudentDetail({ student, onBack }: StudentDetailProps) {
               <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-3">
                 <AlertCircle size={40} />
               </div>
-              <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Hapus Siswa?</h3>
+              <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Hapus Penerima Manfaat?</h3>
               <p className="text-sm text-slate-500 mt-3">
-                Anda akan menghapus data <strong>{student.name}</strong> secara permanen. Seluruh riwayat belajar akan terhapus.
+                Anda akan menghapus data <strong>{localStudent.name}</strong> secara permanen. Seluruh riwayat belajar akan terhapus.
               </p>
               <div className="flex flex-col gap-3 mt-8">
                 <button

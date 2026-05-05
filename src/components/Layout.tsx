@@ -40,7 +40,7 @@ export default function Layout({ children, activeTab, onTabChange }: LayoutProps
                   : 'text-slate-400 hover:text-slate-900'
               }`}
             >
-              Siswa
+              Penerima Manfaat
             </button>
           </nav>
         </div>

@@ -3,6 +3,7 @@ import { Timestamp } from 'firebase/firestore';
 export interface Student {
   id: string;
   name: string;
+  vocation?: string;
   enrollmentDate: Timestamp;
   createdAt: Timestamp;
 }
