@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Represents a student in the tracker.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The student's full name" },
+        "enrollmentDate": { "type": "string", "format": "date-time", "description": "The date the student joined" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the student was added" }
+      },
+      "required": ["name", "enrollmentDate", "createdAt"]
+    },
+    "Activity": {
+      "title": "Student Activity",
+      "description": "Represents a learning record for a student.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Reference to the student ID" },
+        "date": { "type": "string", "format": "date-time", "description": "The date of the learning activity" },
+        "subject": { "type": "string", "description": "The subject name" },
+        "summary": { "type": "string", "description": "A summary of the lesson" },
+        "status": { "type": "string", "enum": ["Paham", "Butuh Review"], "description": "Understanding status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the record was created" }
+      },
+      "required": ["studentId", "date", "subject", "summary", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Collection of students."
+    },
+    "/students/{studentId}/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Collection of learning records for a specific student."
+    }
+  }
+}

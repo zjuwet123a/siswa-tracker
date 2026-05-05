@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Student Validation
+    function isValidStudent(data) {
+      return data.keys().hasAll(['name', 'enrollmentDate', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.enrollmentDate is timestamp &&
+             data.createdAt is timestamp;
+    }
+
+    // Activity Validation
+    function isValidActivity(data) {
+      return data.keys().hasAll(['studentId', 'date', 'subject', 'summary', 'status', 'createdAt']) &&
+             data.keys().size() == 6 &&
+             data.studentId is string && isValidId(data.studentId) &&
+             data.date is timestamp &&
+             data.subject is string && data.subject.size() > 0 && data.subject.size() <= 100 &&
+             data.summary is string && data.summary.size() > 0 && data.summary.size() <= 2000 &&
+             data.status in ['Paham', 'Butuh Review'] &&
+             data.createdAt is timestamp;
+    }
+
+    match /students/{studentId} {
+      allow read: if true; // Allow public read for simplicity in this demo
+      allow create: if isValidStudent(incoming());
+      allow update: if isValidStudent(incoming()) && incoming().createdAt == resource.data.createdAt;
+      allow delete: if true;
+    }
+
+    match /students/{studentId}/activities/{activityId} {
+      allow read: if true;
+      allow create: if isValidActivity(incoming()) && incoming().studentId == studentId;
+      allow update: if isValidActivity(incoming()) && incoming().studentId == studentId && incoming().createdAt == resource.data.createdAt;
+      allow delete: if true;
+    }
+  }
+}
