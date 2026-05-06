@@ -9,7 +9,7 @@ import StudentDetail from './components/StudentDetail';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel';
 import { Loader2 } from 'lucide-react';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './lib/firebase';
 
 export default function App() {
@@ -29,17 +29,26 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        // Check if admin
-        if (currentUser.email === 'akundatakantor@gmail.com') {
-          setIsAdmin(true);
-        } else {
-          try {
-            const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-            setIsAdmin(userDoc.exists() && userDoc.data().role === 'admin');
-          } catch (error) {
-            console.error('Error checking admin status:', error);
-            setIsAdmin(false);
+        // Sync user document to ensure they appear in the system user list
+        try {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (!userDoc.exists()) {
+            const role = currentUser.email === 'akundatakantor@gmail.com' ? 'admin' : 'operator';
+            await setDoc(userDocRef, {
+              email: currentUser.email,
+              displayName: currentUser.displayName || (currentUser.email === 'akundatakantor@gmail.com' ? 'Super Admin' : 'User'),
+              role: role,
+              createdAt: serverTimestamp()
+            });
+            setIsAdmin(role === 'admin');
+          } else {
+            setIsAdmin(userDoc.data().role === 'admin' || currentUser.email === 'akundatakantor@gmail.com');
           }
+        } catch (e) {
+          console.error("Error syncing user:", e);
+          setIsAdmin(currentUser.email === 'akundatakantor@gmail.com');
         }
       } else {
         setIsAdmin(false);

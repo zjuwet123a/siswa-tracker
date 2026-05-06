@@ -42,6 +42,10 @@ export default function AdminPanel() {
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       setUsers(snapshot.docs.map(d => ({ uid: d.id, ...d.data() } as UserData)));
       setLoading(false);
+    }, (error) => {
+      console.error("Error fetching users:", error);
+      handleFirestoreError(error, OperationType.GET, 'users');
+      setLoading(false);
     });
 
     return () => {
@@ -316,40 +320,49 @@ export default function AdminPanel() {
                 <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">Daftar Pengguna Aktif</h3>
               </div>
               <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                {users.map((u, idx) => (
-                  <motion.div 
-                    key={u.uid}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="flex items-center justify-between p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 rounded-2xl group hover:border-indigo-600/30 transition-all"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-sm uppercase shadow-sm">
-                        {u.displayName?.[0] || u.email?.[0]}
-                      </div>
-                      <div>
-                        <p className="text-[12px] font-black text-slate-800 dark:text-white uppercase tracking-tight">{u.displayName}</p>
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-0.5">{u.email}</p>
-                      </div>
+                {users.length === 0 ? (
+                  <div className="py-12 flex flex-col items-center gap-4 text-center bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border border-dashed border-slate-200 dark:border-slate-700">
+                    <Users className="w-12 h-12 text-slate-300" />
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Belum Ada Pengguna Terdaftar</p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      {u.email === 'akundatakantor@gmail.com' ? (
-                        <span className="px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-amber-500 text-white border-none">
-                          Super Admin
-                        </span>
-                      ) : (
-                        <span className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
-                          u.role === 'admin' 
-                            ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400' 
-                            : 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400'
-                        }`}>
-                          {u.role}
-                        </span>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
+                  </div>
+                ) : (
+                  users.map((u, idx) => (
+                    <motion.div 
+                      key={u.uid}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="flex items-center justify-between p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 rounded-2xl group hover:border-indigo-600/30 transition-all"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-sm uppercase shadow-sm">
+                          {u.displayName?.[0] || u.email?.[0]}
+                        </div>
+                        <div>
+                          <p className="text-[12px] font-black text-slate-800 dark:text-white uppercase tracking-tight">{u.displayName}</p>
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-0.5">{u.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {u.email === 'akundatakantor@gmail.com' ? (
+                          <span className="px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-amber-500 text-white border-none">
+                            Super Admin
+                          </span>
+                        ) : (
+                          <span className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
+                            u.role === 'admin' 
+                              ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400' 
+                              : 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400'
+                          }`}>
+                            {u.role}
+                          </span>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))
+                )}
               </div>
             </div>
           ) : (
