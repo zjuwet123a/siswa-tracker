@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { auth } from './lib/firebase';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -9,7 +9,7 @@ import StudentDetail from './components/StudentDetail';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel';
 import { Loader2 } from 'lucide-react';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from './lib/firebase';
 
 export default function App() {
@@ -34,17 +34,32 @@ export default function App() {
           const userDocRef = doc(db, 'users', currentUser.uid);
           const userDoc = await getDoc(userDocRef);
           
+          const userData = {
+            email: currentUser.email,
+            displayName: currentUser.displayName || (currentUser.email === 'akundatakantor@gmail.com' ? 'Super Admin' : 'User'),
+            lastActive: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          };
+
           if (!userDoc.exists()) {
-            const role = currentUser.email === 'akundatakantor@gmail.com' ? 'admin' : 'operator';
+            const role = currentUser.email === 'akundatakantor@gmail.com' || currentUser.email === 'admin@pm.com' ? 'admin' : 'operator';
             await setDoc(userDocRef, {
-              email: currentUser.email,
-              displayName: currentUser.displayName || (currentUser.email === 'akundatakantor@gmail.com' ? 'Super Admin' : 'User'),
+              ...userData,
               role: role,
-              createdAt: serverTimestamp()
+              createdAt: serverTimestamp(),
+              forceLogout: false
             });
             setIsAdmin(role === 'admin');
           } else {
-            setIsAdmin(userDoc.data().role === 'admin' || currentUser.email === 'akundatakantor@gmail.com');
+            // Merge existing role to prevent overwriting it unless it's the super admin
+            const existingRole = userDoc.data().role || 'operator';
+            const finalRole = currentUser.email === 'akundatakantor@gmail.com' ? 'admin' : existingRole;
+            
+            await updateDoc(userDocRef, {
+              ...userData,
+              role: finalRole
+            });
+            setIsAdmin(finalRole === 'admin');
           }
         } catch (e) {
           console.error("Error syncing user:", e);
@@ -57,6 +72,56 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Listen for force logout
+  useEffect(() => {
+    if (!user) return;
+
+    // Activity tracking
+    let lastUpdate = Date.now();
+    const updateActivity = async () => {
+      const now = Date.now();
+      // Only update once every 2 minutes to save database writes
+      if (now - lastUpdate > 2 * 60 * 1000) {
+        lastUpdate = now;
+        try {
+          await updateDoc(doc(db, 'users', user.uid), {
+            lastActive: serverTimestamp()
+          });
+        } catch (e) {
+          console.error("Error updating activity:", e);
+        }
+      }
+    };
+
+    window.addEventListener('mousemove', updateActivity);
+    window.addEventListener('keydown', updateActivity);
+    window.addEventListener('click', updateActivity);
+
+    const unsubUser = onSnapshot(doc(db, 'users', user.uid), async (snapshot) => {
+      const data = snapshot.data();
+      if (data?.forceLogout === true) {
+        try {
+          // Reset the flag first so they can log back in later
+          await updateDoc(doc(db, 'users', user.uid), {
+            forceLogout: false
+          });
+          // Sign out
+          await signOut(auth);
+        } catch (error) {
+          console.error("Error during force logout:", error);
+          await signOut(auth);
+        }
+      }
+    });
+
+    return () => {
+      window.removeEventListener('mousemove', updateActivity);
+      window.removeEventListener('keydown', updateActivity);
+      window.removeEventListener('click', updateActivity);
+      unsubUser();
+    };
+  }, [user]);
 
   if (loading) {
     return (

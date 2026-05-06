@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, addDoc, deleteDoc, doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
 import { Cluster, Category, UserData } from '../types';
-import { Plus, Trash2, Users, Layers, Tag, Shield, Loader2, UserPlus, Mail, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Users, Layers, Tag, Shield, Loader2, UserPlus, Mail, Lock, CheckCircle2, AlertCircle, LogOut, Pencil, UserCog } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-type Tab = 'add_user' | 'users_list' | 'clusters' | 'categories';
+type Tab = 'add_user' | 'all_users' | 'active_users' | 'clusters' | 'categories';
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('add_user');
@@ -29,6 +29,24 @@ export default function AdminPanel() {
   const [addUserLoading, setAddUserLoading] = useState(false);
   const [addUserError, setAddUserError] = useState<string | null>(null);
   const [addUserSuccess, setAddUserSuccess] = useState(false);
+  const [confirmLogoutUser, setConfirmLogoutUser] = useState<UserData | null>(null);
+  const [forceLogoutProcessing, setForceLogoutProcessing] = useState(false);
+
+  // Edit User States
+  const [editingUser, setEditingUser] = useState<UserData | null>(null);
+  const [updateUserName, setUpdateUserName] = useState('');
+  const [updateUserRole, setUpdateUserRole] = useState<'admin' | 'operator'>('operator');
+  const [updateUserLoading, setUpdateUserLoading] = useState(false);
+  
+  // Delete User States
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<UserData | null>(null);
+  const [deleteValidationCode, setDeleteValidationCode] = useState('');
+  const [userInputDeleteCode, setUserInputDeleteCode] = useState('');
+  const [deleteUserLoading, setDeleteUserLoading] = useState(false);
+
+  const generateRandomCode = () => {
+    return Math.random().toString(36).substring(2, 7).toUpperCase();
+  };
 
   useEffect(() => {
     const unsubClusters = onSnapshot(collection(db, 'clusters'), (snapshot) => {
@@ -125,6 +143,101 @@ export default function AdminPanel() {
     }
   };
 
+  const handleForceLogout = async (user: UserData) => {
+    setConfirmLogoutUser(user);
+  };
+
+  const handleEditUser = (user: UserData) => {
+    setEditingUser(user);
+    setUpdateUserName(user.displayName || '');
+    setUpdateUserRole(user.role as 'admin' | 'operator');
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setUpdateUserLoading(true);
+    try {
+      await updateDoc(doc(db, 'users', editingUser.uid), {
+        displayName: updateUserName,
+        role: updateUserRole,
+        updatedAt: serverTimestamp()
+      });
+      setEditingUser(null);
+      alert('Data user berhasil diperbarui.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${editingUser.uid}`);
+    } finally {
+      setUpdateUserLoading(false);
+    }
+  };
+
+  const handleDeleteUserClick = (user: UserData) => {
+    setConfirmDeleteUser(user);
+    setDeleteValidationCode(generateRandomCode());
+    setUserInputDeleteCode('');
+  };
+
+  const executeDeleteUser = async () => {
+    if (!confirmDeleteUser) return;
+    if (userInputDeleteCode !== deleteValidationCode) {
+      alert('Kode validasi tidak sesuai.');
+      return;
+    }
+
+    setDeleteUserLoading(true);
+    try {
+      await deleteDoc(doc(db, 'users', confirmDeleteUser.uid));
+      setConfirmDeleteUser(null);
+      alert(`User ${confirmDeleteUser.displayName || confirmDeleteUser.email} berhasil dihapus.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${confirmDeleteUser.uid}`);
+    } finally {
+      setDeleteUserLoading(false);
+    }
+  };
+
+  const executeForceLogout = async () => {
+    if (!confirmLogoutUser) return;
+    
+    setForceLogoutProcessing(true);
+    try {
+      await updateDoc(doc(db, 'users', confirmLogoutUser.uid), {
+        forceLogout: true,
+        lastForceLogout: serverTimestamp()
+      });
+      setConfirmLogoutUser(null);
+      alert(`Perintah logout telah dikirim ke ${confirmLogoutUser.displayName || confirmLogoutUser.email}.`);
+    } catch (error) {
+      console.error("Force logout error:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `users/${confirmLogoutUser.uid}`);
+    } finally {
+      setForceLogoutProcessing(false);
+    }
+  };
+
+  const getActiveUsers = () => {
+    // Show users active in the last 30 minutes in the "Active" tab
+    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+    return users.filter(u => {
+      if (u.email === 'akundatakantor@gmail.com') return false;
+      const lastActive = u.lastActive?.toDate?.()?.getTime() || 0;
+      return lastActive > thirtyMinutesAgo;
+    });
+  };
+
+  const getStatusInfo = (lastActiveTs: any) => {
+    const lastActive = lastActiveTs?.toDate?.()?.getTime() || 0;
+    const now = Date.now();
+    const diff = now - lastActive;
+
+    if (diff < 5 * 60 * 1000) {
+      return { label: 'Online', color: 'bg-emerald-500', text: 'text-emerald-500' };
+    } else {
+      return { label: 'Idle', color: 'bg-amber-500', text: 'text-amber-500' };
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -133,6 +246,20 @@ export default function AdminPanel() {
       </div>
     );
   }
+
+  const activeUsersList = getActiveUsers().sort((a, b) => {
+    const timeA = a.lastActive?.toDate?.()?.getTime() || 0;
+    const timeB = b.lastActive?.toDate?.()?.getTime() || 0;
+    return timeB - timeA;
+  });
+
+  const sortedAllUsers = users
+    .filter(u => u.email !== 'akundatakantor@gmail.com')
+    .sort((a, b) => {
+      const timeA = a.createdAt?.toDate?.()?.getTime() || 0;
+      const timeB = b.createdAt?.toDate?.()?.getTime() || 0;
+      return timeB - timeA;
+    });
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -152,47 +279,58 @@ export default function AdminPanel() {
         <div className="flex border-b border-slate-100 dark:border-slate-800 p-2">
           <button
             onClick={() => setActiveTab('add_user')}
-            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[10px] font-black uppercase tracking-widest transition-all rounded-2xl ${
+            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[9px] font-black uppercase tracking-widest transition-all rounded-2xl ${
               activeTab === 'add_user' 
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
                 : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
           >
-            <UserPlus size={16} />
+            <UserPlus size={14} />
             Tambah User
           </button>
           <button
-            onClick={() => setActiveTab('users_list')}
-            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[10px] font-black uppercase tracking-widest transition-all rounded-2xl ${
-              activeTab === 'users_list' 
+            onClick={() => setActiveTab('all_users')}
+            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[9px] font-black uppercase tracking-widest transition-all rounded-2xl ${
+              activeTab === 'all_users' 
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
                 : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
           >
-            <Users size={16} />
+            <UserCog size={14} />
             Daftar User
           </button>
           <button
+            onClick={() => setActiveTab('active_users')}
+            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[9px] font-black uppercase tracking-widest transition-all rounded-2xl ${
+              activeTab === 'active_users' 
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
+                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+            }`}
+          >
+            <Users size={14} />
+            User Aktif
+          </button>
+          <button
             onClick={() => setActiveTab('clusters')}
-            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[10px] font-black uppercase tracking-widest transition-all rounded-2xl ${
+            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[9px] font-black uppercase tracking-widest transition-all rounded-2xl ${
               activeTab === 'clusters' 
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
                 : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
           >
-            <Layers size={16} />
-            Daftar Klaster
+            <Layers size={14} />
+            Klaster
           </button>
           <button
             onClick={() => setActiveTab('categories')}
-            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[10px] font-black uppercase tracking-widest transition-all rounded-2xl ${
+            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[9px] font-black uppercase tracking-widest transition-all rounded-2xl ${
               activeTab === 'categories' 
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
                 : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
           >
-            <Tag size={16} />
-            Jenis Penyusun
+            <Tag size={14} />
+            Penyusun
           </button>
         </div>
 
@@ -313,57 +451,143 @@ export default function AdminPanel() {
                 </form>
               )}
             </div>
-          ) : activeTab === 'users_list' ? (
-            <div className="max-w-2xl mx-auto space-y-6">
+          ) : activeTab === 'all_users' ? (
+            <div className="max-w-4xl mx-auto space-y-6">
               <div className="flex items-center gap-3 mb-6">
-                <Users className="text-indigo-600" size={20} />
-                <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">Daftar Pengguna Aktif</h3>
+                <UserCog className="text-indigo-600" size={20} />
+                <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">Manajemen Daftar User</h3>
               </div>
-              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                {users.length === 0 ? (
-                  <div className="py-12 flex flex-col items-center gap-4 text-center bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border border-dashed border-slate-200 dark:border-slate-700">
-                    <Users className="w-12 h-12 text-slate-300" />
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Belum Ada Pengguna Terdaftar</p>
-                    </div>
-                  </div>
-                ) : (
-                  users.map((u, idx) => (
-                    <motion.div 
-                      key={u.uid}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: idx * 0.05 }}
-                      className="flex items-center justify-between p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 rounded-2xl group hover:border-indigo-600/30 transition-all"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-sm uppercase shadow-sm">
-                          {u.displayName?.[0] || u.email?.[0]}
-                        </div>
-                        <div>
-                          <p className="text-[12px] font-black text-slate-800 dark:text-white uppercase tracking-tight">{u.displayName}</p>
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-0.5">{u.email}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {u.email === 'akundatakantor@gmail.com' ? (
-                          <span className="px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-amber-500 text-white border-none">
-                            Super Admin
-                          </span>
-                        ) : (
-                          <span className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
+              <div className="overflow-x-auto">
+                <table className="w-full border-separate border-spacing-y-3">
+                  <thead>
+                    <tr>
+                      <th className="px-6 py-4 text-left text-[9px] font-black text-slate-400 uppercase tracking-widest">Pengguna</th>
+                      <th className="px-6 py-4 text-left text-[9px] font-black text-slate-400 uppercase tracking-widest">Email</th>
+                      <th className="px-6 py-4 text-left text-[9px] font-black text-slate-400 uppercase tracking-widest">Peran</th>
+                      <th className="px-6 py-4 text-right text-[9px] font-black text-slate-400 uppercase tracking-widest">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedAllUsers.map((u, idx) => (
+                      <motion.tr 
+                        key={u.uid}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.03 }}
+                        className="bg-slate-50 dark:bg-slate-800/50 group"
+                      >
+                        <td className="px-6 py-4 rounded-l-2xl">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black text-[10px] uppercase">
+                              {u.displayName?.[0] || u.email?.[0]}
+                            </div>
+                            <span className="text-[11px] font-black text-slate-700 dark:text-white uppercase">{u.displayName}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px] block">{u.email}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border ${
                             u.role === 'admin' 
                               ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400' 
                               : 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400'
                           }`}>
                             {u.role}
                           </span>
-                        )}
+                        </td>
+                        <td className="px-6 py-4 rounded-r-2xl text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handleEditUser(u)}
+                              className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
+                              title="Edit Pengguna"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => handleDeleteUserClick(u)}
+                                className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl transition-all"
+                                title="Hapus Pengguna"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : activeTab === 'active_users' ? (
+            <div className="max-w-2xl mx-auto space-y-6">
+              <div className="flex items-center gap-3 mb-6">
+                <Users className="text-indigo-600" size={20} />
+                <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">Daftar Pengguna Aktif</h3>
+              </div>
+              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                {activeUsersList.length === 0 ? (
+                  <div className="py-12 flex flex-col items-center gap-4 text-center bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border border-dashed border-slate-200 dark:border-slate-700">
+                    <Users className="w-12 h-12 text-slate-300" />
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Tidak Ada Pengguna Aktif Saat Ini</p>
+                    </div>
+                  </div>
+                ) : (
+                  activeUsersList.map((u, idx) => {
+                    const status = getStatusInfo(u.lastActive);
+                    return (
+                      <motion.div 
+                        key={u.uid}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: idx * 0.05 }}
+                        className="flex items-center justify-between p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 rounded-2xl group hover:border-indigo-600/30 transition-all"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="relative">
+                            <div className="w-12 h-12 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-sm uppercase shadow-sm">
+                              {u.displayName?.[0] || u.email?.[0]}
+                            </div>
+                            <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+                              <div className={`w-2.5 h-2.5 rounded-full ${status.color} ${status.label === 'Online' ? 'animate-pulse' : ''}`} />
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[12px] font-black text-slate-800 dark:text-white uppercase tracking-tight">{u.displayName}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none outline-none">{u.email}</p>
+                              <span className="w-1 h-1 rounded-full bg-slate-300" />
+                              <p className={`text-[8px] font-bold uppercase ${status.text}`}>{status.label}</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
+                              u.role === 'admin' 
+                                ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400' 
+                                : 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400'
+                            }`}>
+                              {u.role}
+                            </span>
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => handleForceLogout(u)}
+                                title="Paksa Logout"
+                                className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl transition-all"
+                              >
+                                <LogOut size={14} />
+                              </button>
+                            )}
                       </div>
                     </motion.div>
-                  ))
-                )}
-              </div>
+                  );
+                })
+              )}
+            </div>
             </div>
           ) : (
             <div className="space-y-8">
@@ -416,6 +640,242 @@ export default function AdminPanel() {
           )}
         </div>
       </div>
+
+      {/* Delete User Confirmation Modal */}
+      <AnimatePresence>
+        {confirmDeleteUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !deleteUserLoading && setConfirmDeleteUser(null)}
+              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 p-8 overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-rose-600" />
+              <div className="flex flex-col items-center text-center gap-6">
+                <div className="w-16 h-16 rounded-3xl bg-rose-50 dark:bg-rose-500/10 flex items-center justify-center text-rose-600">
+                  <Trash2 size={32} />
+                </div>
+                
+                <div className="space-y-2">
+                  <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Hapus Pengguna</h3>
+                  <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase leading-relaxed">
+                    Anda akan menghapus <span className="text-slate-800 dark:text-slate-200 font-black">{confirmDeleteUser.displayName || confirmDeleteUser.email}</span>.
+                    Tindakan ini tidak dapat dibatalkan.
+                  </p>
+                </div>
+
+                <div className="w-full space-y-3">
+                  <div className="flex flex-col items-center gap-2">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ketik kode berikut untuk konfirmasi:</p>
+                    <div className="px-6 py-3 bg-slate-100 dark:bg-slate-800 rounded-xl font-black text-lg tracking-[0.3em] text-slate-800 dark:text-white border-2 border-dashed border-slate-200 dark:border-slate-700 select-none">
+                      {deleteValidationCode}
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={userInputDeleteCode}
+                    onChange={(e) => setUserInputDeleteCode(e.target.value.toUpperCase())}
+                    placeholder="Masukan Kode"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl py-4 px-6 text-center text-sm font-black tracking-[0.2em] outline-none focus:border-rose-600 transition-all uppercase"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 w-full">
+                  <button
+                    onClick={() => setConfirmDeleteUser(null)}
+                    disabled={deleteUserLoading}
+                    className="py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all border border-slate-100 dark:border-slate-800"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={executeDeleteUser}
+                    disabled={deleteUserLoading || userInputDeleteCode !== deleteValidationCode}
+                    className="py-4 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 shadow-lg shadow-rose-100 dark:shadow-none disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                  >
+                    {deleteUserLoading ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Menghapus...
+                      </>
+                    ) : (
+                      'Hapus User'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Force Logout Confirmation Modal */}
+      <AnimatePresence>
+        {editingUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !updateUserLoading && setEditingUser(null)}
+              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 p-10 overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-indigo-600" />
+              <div className="space-y-8">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center text-indigo-600">
+                    <UserCog size={28} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Edit Pengguna</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{editingUser.email}</p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleUpdateUser} className="space-y-6">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Nama Lengkap</label>
+                    <input
+                      type="text"
+                      required
+                      value={updateUserName}
+                      onChange={(e) => setUpdateUserName(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl py-4 px-6 text-sm font-medium dark:text-white focus:bg-white focus:border-indigo-600 outline-none transition-all"
+                    />
+                  </div>
+
+                  {isSuperAdmin && editingUser.email !== 'akundatakantor@gmail.com' && (
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Peran Akses</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setUpdateUserRole('operator')}
+                          className={`py-3 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${
+                            updateUserRole === 'operator' 
+                              ? 'bg-indigo-50 border-indigo-200 text-indigo-600' 
+                              : 'bg-slate-50 border-slate-100 text-slate-400'
+                          }`}
+                        >
+                          Operator
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUpdateUserRole('admin')}
+                          className={`py-3 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${
+                            updateUserRole === 'admin' 
+                              ? 'bg-rose-50 border-rose-200 text-rose-600' 
+                              : 'bg-slate-50 border-slate-100 text-slate-400'
+                          }`}
+                        >
+                          Admin
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser(null)}
+                      disabled={updateUserLoading}
+                      className="py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-all border border-slate-100"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={updateUserLoading}
+                      className="py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-100 dark:shadow-none disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                    >
+                      {updateUserLoading ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          Menyimpan...
+                        </>
+                      ) : (
+                        'Simpan Perubahan'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {confirmLogoutUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !forceLogoutProcessing && setConfirmLogoutUser(null)}
+              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 p-8 overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-rose-600" />
+              <div className="flex flex-col items-center text-center gap-6">
+                <div className="w-16 h-16 rounded-3xl bg-rose-50 dark:bg-rose-500/10 flex items-center justify-center text-rose-600">
+                  <LogOut size={32} />
+                </div>
+                
+                <div className="space-y-2">
+                  <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Konfirmasi Logout</h3>
+                  <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase leading-relaxed">
+                    Apakah Anda yakin ingin memaksa <span className="text-slate-800 dark:text-slate-200">{confirmLogoutUser.displayName || confirmLogoutUser.email}</span> keluar dari aplikasi?
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 w-full">
+                  <button
+                    onClick={() => setConfirmLogoutUser(null)}
+                    disabled={forceLogoutProcessing}
+                    className="py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all border border-slate-100 dark:border-slate-800"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={executeForceLogout}
+                    disabled={forceLogoutProcessing}
+                    className="py-4 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 shadow-lg shadow-rose-100 dark:shadow-none disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                  >
+                    {forceLogoutProcessing ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Memproses...
+                      </>
+                    ) : (
+                      'Paksa Logout'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
