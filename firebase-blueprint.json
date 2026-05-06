@@ -6,7 +6,10 @@
       "type": "object",
       "properties": {
         "name": { "type": "string", "description": "The student's full name" },
+        "vocation": { "type": "string", "description": "Vocational skill" },
+        "clusters": { "type": "array", "items": { "type": "string" }, "description": "Student clusters" },
         "enrollmentDate": { "type": "string", "format": "date-time", "description": "The date the student joined" },
+        "photoUrl": { "type": "string", "description": "Profile photo URL" },
         "createdAt": { "type": "string", "format": "date-time", "description": "When the student was added" }
       },
       "required": ["name", "enrollmentDate", "createdAt"]
@@ -18,13 +21,44 @@
       "properties": {
         "studentId": { "type": "string", "description": "Reference to the student ID" },
         "date": { "type": "string", "format": "date-time", "description": "The date of the learning activity" },
+        "category": { "type": "string", "description": "Category of the activity (e.g., Peksos)" },
         "classActivity": { "type": "string", "description": "The activity performed in class" },
         "results": { "type": "string", "description": "The results or outcome of the activity" },
         "createdBy": { "type": "string", "description": "ID of the user who created this activity" },
         "createdByName": { "type": "string", "description": "Name of the user who created this activity" },
         "createdAt": { "type": "string", "format": "date-time", "description": "When the record was created" }
       },
-      "required": ["studentId", "date", "classActivity", "results", "createdAt"]
+      "required": ["studentId", "date", "category", "classActivity", "results", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "System user.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "operator"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "role", "createdAt"]
+    },
+    "Cluster": {
+      "title": "Cluster",
+      "description": "Student cluster option.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Activity category option.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
     }
   },
   "firestore": {
@@ -35,6 +69,18 @@
     "/students/{studentId}/activities/{activityId}": {
       "schema": "Activity",
       "description": "Collection of learning records for a specific student."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Application users."
+    },
+    "/clusters/{clusterId}": {
+      "schema": "Cluster",
+      "description": "Available student clusters."
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Available activity categories."
     }
   }
 }

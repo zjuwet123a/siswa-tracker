@@ -1,9 +1,28 @@
 import { Timestamp } from 'firebase/firestore';
 
+export interface UserData {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'admin' | 'operator';
+  createdAt: Timestamp;
+}
+
+export interface Cluster {
+  id: string;
+  name: string;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+}
+
 export interface Student {
   id: string;
   name: string;
   vocation?: string;
+  clusters?: string[];
   enrollmentDate: Timestamp;
   photoUrl?: string;
   createdAt: Timestamp;
@@ -13,7 +32,7 @@ export interface Activity {
   id: string;
   studentId: string;
   date: Timestamp;
-  category: 'Peksos' | 'Instruktur' | 'Psikolog' | 'Pengasuh' | 'Penyuluh';
+  category: string;
   classActivity: string;
   results: string;
   createdBy?: string;

@@ -1,10 +1,12 @@
 import React from 'react';
-import { LayoutDashboard, Users, BookOpen, GraduationCap, LogOut, User, Lock, Key, X, AlertCircle, CheckCircle2, UserPlus, Mail, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Users, BookOpen, GraduationCap, LogOut, User, Lock, Key, X, AlertCircle, CheckCircle2, UserPlus, Mail, Sun, Moon, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useLocation } from 'react-router-dom';
 import { auth } from '../lib/firebase';
 import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword, getAuth, updateProfile } from 'firebase/auth';
 import { initializeApp, getApp, getApps } from 'firebase/app';
+import { getDoc, doc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 interface LayoutProps {
@@ -16,10 +18,11 @@ interface LayoutProps {
 export default function Layout({ children, isDarkMode, setIsDarkMode }: LayoutProps) {
   const location = useLocation();
   const activeTab = location.pathname.startsWith('/dashboard') ? 'dashboard' : 
-                    location.pathname.startsWith('/penerima-manfaat') || location.pathname.startsWith('/profile') ? 'students' : 'dashboard';
+                    location.pathname.startsWith('/penerima-manfaat') || location.pathname.startsWith('/profile') ? 'students' : 
+                    location.pathname.startsWith('/admin') ? 'admin' : 'dashboard';
 
   const user = auth.currentUser;
-  const isAdmin = user?.email === 'akundatakantor@gmail.com';
+  const [isAdmin, setIsAdmin] = React.useState(user?.email === 'akundatakantor@gmail.com');
   const [isProfileOpen, setIsProfileOpen] = React.useState(false);
   const [showPasswordModal, setShowPasswordModal] = React.useState(false);
   const [newPassword, setNewPassword] = React.useState('');
@@ -29,17 +32,22 @@ export default function Layout({ children, isDarkMode, setIsDarkMode }: LayoutPr
   const [passwordError, setPasswordError] = React.useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = React.useState(false);
 
-  // New User States
-  const [showAddUserModal, setShowAddUserModal] = React.useState(false);
-  const [newUserName, setNewUserName] = React.useState('');
-  const [newUserEmail, setNewUserEmail] = React.useState('');
-  const [newUserPassword, setNewUserPassword] = React.useState('');
-  const [addUserLoading, setAddUserLoading] = React.useState(false);
-  const [addUserError, setAddUserError] = React.useState<string | null>(null);
-  const [addUserSuccess, setAddUserSuccess] = React.useState(false);
-
   // Auto Logout Logic
   const INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes
+
+  React.useEffect(() => {
+    if (user) {
+      if (user.email === 'akundatakantor@gmail.com') {
+        setIsAdmin(true);
+      } else {
+        getDoc(doc(db, 'users', user.uid)).then(docSnap => {
+          if (docSnap.exists() && docSnap.data().role === 'admin') {
+            setIsAdmin(true);
+          }
+        });
+      }
+    }
+  }, [user]);
 
   React.useEffect(() => {
     let timeoutId: NodeJS.Timeout;
@@ -119,53 +127,6 @@ export default function Layout({ children, isDarkMode, setIsDarkMode }: LayoutPr
       setPasswordError(error.message || 'Gagal mengubah password.');
     } finally {
       setPasswordLoading(false);
-    }
-  };
-
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isAdmin) {
-      setAddUserError('Hanya admin yang dapat menambah user.');
-      return;
-    }
-    if (!newUserName.trim()) {
-      setAddUserError('Nama user wajib diisi.');
-      return;
-    }
-    setAddUserLoading(true);
-    setAddUserError(null);
-
-    try {
-      // Create a secondary Firebase app to avoid logging out the current admin
-      const secondaryApp = getApps().find(app => app.name === 'Secondary') || initializeApp(firebaseConfig, 'Secondary');
-      const secondaryAuth = getAuth(secondaryApp);
-
-      const finalEmail = newUserEmail.includes('@') ? newUserEmail : `${newUserEmail.trim().toLowerCase()}@pm.com`;
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, finalEmail, newUserPassword);
-      
-      // Update display name for the new user
-      await updateProfile(userCredential.user, {
-        displayName: newUserName
-      });
-      
-      setAddUserSuccess(true);
-      setTimeout(() => {
-        setShowAddUserModal(false);
-        setAddUserSuccess(false);
-        setNewUserName('');
-        setNewUserEmail('');
-        setNewUserPassword('');
-        setIsProfileOpen(false);
-      }, 2000);
-    } catch (error: any) {
-      console.error('Add user error:', error);
-      let message = 'Gagal menambah user.';
-      if (error.code === 'auth/email-already-in-use') message = 'Email sudah terdaftar.';
-      if (error.code === 'auth/invalid-email') message = 'Format email tidak valid.';
-      if (error.code === 'auth/weak-password') message = 'Password terlalu lemah.';
-      setAddUserError(message);
-    } finally {
-      setAddUserLoading(false);
     }
   };
 
@@ -259,16 +220,14 @@ export default function Layout({ children, isDarkMode, setIsDarkMode }: LayoutPr
                       Ubah Password
                     </button>
                     {isAdmin && (
-                      <button
-                        onClick={() => {
-                          setIsProfileOpen(false);
-                          setShowAddUserModal(true);
-                        }}
+                      <Link
+                        to="/admin"
+                        onClick={() => setIsProfileOpen(false)}
                         className="w-full px-4 py-3 flex items-center gap-3 text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors border-b border-slate-50 dark:border-slate-800"
                       >
-                        <UserPlus size={14} className="text-indigo-600 dark:text-indigo-400" />
-                        Tambah User
-                      </button>
+                        <Shield size={14} className="text-rose-600 dark:text-rose-400" />
+                        Admin Panel
+                      </Link>
                     )}
                     
                     <button
@@ -414,115 +373,6 @@ export default function Layout({ children, isDarkMode, setIsDarkMode }: LayoutPr
                     className="w-full bg-slate-900 dark:bg-indigo-600 text-white rounded-2xl py-4 font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-slate-800 dark:hover:bg-indigo-500 disabled:opacity-50 transition-all mt-4"
                   >
                     {passwordLoading ? 'Memproses...' : 'Simpan Perubahan'}
-                  </button>
-                </form>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Add User Modal */}
-      <AnimatePresence>
-        {showAddUserModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => !addUserLoading && setShowAddUserModal(false)}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity:0, scale: 0.9, y: 20 }}
-              animate={{ opacity:1, scale: 1, y: 0 }}
-              exit={{ opacity:0, scale: 0.9, y: 20 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[3rem] p-10 shadow-2xl overflow-hidden"
-            >
-              <button 
-                onClick={() => setShowAddUserModal(false)}
-                className="absolute top-6 right-6 p-2 rounded-full hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-              >
-                <X size={20} className="text-slate-400" />
-              </button>
-
-              <div className="flex flex-col items-center mb-8">
-                <div className="p-4 bg-indigo-50 dark:bg-slate-800 rounded-2xl text-indigo-600 dark:text-indigo-400 mb-4 rotate-3">
-                  <UserPlus size={28} />
-                </div>
-                <h2 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Tambah User Baru</h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Registrasi Operator PKBM</p>
-              </div>
-
-              {addUserSuccess ? (
-                <div className="py-8 flex flex-col items-center gap-4 text-center">
-                  <CheckCircle2 className="w-16 h-16 text-emerald-500" />
-                  <div>
-                    <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tight">Berhasil!</h3>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase">User baru telah didaftarkan.</p>
-                  </div>
-                </div>
-              ) : (
-                <form onSubmit={handleAddUser} className="space-y-4">
-                  <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Nama Lengkap</label>
-                    <div className="relative">
-                      <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                      <input
-                        type="text"
-                        required
-                        value={newUserName}
-                        onChange={(e) => setNewUserName(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl py-3.5 pl-12 pr-4 text-sm font-medium dark:text-white focus:bg-white dark:focus:bg-slate-700 focus:border-indigo-600 outline-none transition-all"
-                        placeholder="Nama Lengkap"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Username / Email</label>
-                    <div className="relative">
-                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                      <input
-                        type="text"
-                        required
-                        value={newUserEmail}
-                        onChange={(e) => setNewUserEmail(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl py-3.5 pl-12 pr-4 text-sm font-medium dark:text-white focus:bg-white dark:focus:bg-slate-700 focus:border-indigo-600 outline-none transition-all"
-                        placeholder="contoh: user123 atau email@domain.com"
-                      />
-                    </div>
-                    <p className="text-[8px] text-slate-400 mt-1 ml-1 uppercase font-bold italic">* Jika hanya username, login akan menggunakan format username@pm.com</p>
-                  </div>
-
-                  <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Password Baru</label>
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                      <input
-                        type="password"
-                        required
-                        value={newUserPassword}
-                        onChange={(e) => setNewUserPassword(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl py-3.5 pl-12 pr-4 text-sm font-medium dark:text-white focus:bg-white dark:focus:bg-slate-700 focus:border-indigo-600 outline-none transition-all"
-                        placeholder="••••••••"
-                      />
-                    </div>
-                  </div>
-
-                  {addUserError && (
-                    <div className="flex items-center gap-2 p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 rounded-xl text-rose-500">
-                      <AlertCircle size={14} />
-                      <span className="text-[9px] font-black uppercase tracking-widest">{addUserError}</span>
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={addUserLoading}
-                    className="w-full bg-slate-900 dark:bg-indigo-600 text-white rounded-2xl py-4 font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-slate-800 dark:hover:bg-indigo-500 disabled:opacity-50 transition-all mt-4"
-                  >
-                    {addUserLoading ? 'Memproses...' : 'Daftarkan User'}
                   </button>
                 </form>
               )}

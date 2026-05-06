@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
-import { Student, Activity } from '../types';
-import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2, Eye, X } from 'lucide-react';
+import { Student, Activity, Category, Cluster } from '../types';
+import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2, Eye, X, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useParams, useNavigate } from 'react-router-dom';
 import { uploadToGoogleDrive, GOOGLE_DRIVE_SCOPES, backupToSystemDrive } from '../lib/googleDrive';
+import ImageCropper from './ImageCropper';
+import MultiSelect from './MultiSelect';
 
 declare global {
   interface Window {
@@ -20,11 +22,14 @@ export default function StudentDetail() {
   const navigate = useNavigate();
   const [localStudent, setLocalStudent] = useState<Student | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [activeCategory, setActiveCategory] = useState<'Semua' | Activity['category']>('Semua');
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string>('Semua');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [studentNotFound, setStudentNotFound] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState<Activity['attachment'] | null>(null);
+  const [selectedActivityForDetail, setSelectedActivityForDetail] = useState<Activity | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // Effect to handle Blob URL creation and cleanup for PDF previews
@@ -117,6 +122,7 @@ export default function StudentDetail() {
         setEditFormData({
           name: studentData.name,
           vocation: studentData.vocation || '',
+          clusters: studentData.clusters || [],
           enrollmentDate: studentData.enrollmentDate?.toDate().toISOString().split('T')[0] || '',
           photoUrl: studentData.photoUrl || ''
         });
@@ -155,11 +161,28 @@ export default function StudentDetail() {
     };
   }, [studentId]);
 
+  useEffect(() => {
+    const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      setCategories(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Category)));
+    });
+    const unsubClusters = onSnapshot(collection(db, 'clusters'), (snapshot) => {
+      setClusters(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Cluster)));
+    });
+    return () => {
+      unsubCategories();
+      unsubClusters();
+    };
+  }, []);
+
+  const CATEGORY_OPTIONS = categories.map(c => c.name);
+  const CLUSTER_OPTIONS = clusters.map(c => c.name);
+
   // Initial state for edit form should be handled after student load
   // We'll use useEffect to sync localStudent changes to editFormData
   const [editFormData, setEditFormData] = useState({
     name: '',
     vocation: '',
+    clusters: [] as string[],
     enrollmentDate: '',
     photoUrl: ''
   });
@@ -259,6 +282,7 @@ export default function StudentDetail() {
   const [showDeleteStudentModal, setShowDeleteStudentModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
 
   const handleEditPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -270,16 +294,17 @@ export default function StudentDetail() {
       return;
     }
 
-    if (file.size > 500 * 1024) {
-      alert('Ukuran file maksimal 500KB');
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Ukuran file maksimal 2MB untuk proses cropping');
       return;
     }
 
     const reader = new FileReader();
     reader.onloadstart = () => setIsPhotoUploading(true);
     reader.onload = (event) => {
-      setEditFormData(prev => ({ ...prev, photoUrl: event.target?.result as string }));
+      setImageToCrop(event.target?.result as string);
       setIsPhotoUploading(false);
+      e.target.value = '';
     };
     reader.readAsDataURL(file);
   };
@@ -292,6 +317,7 @@ export default function StudentDetail() {
       await updateDoc(doc(db, 'students', localStudent.id), {
         name: editFormData.name.trim(),
         vocation: editFormData.vocation.trim(),
+        clusters: editFormData.clusters,
         enrollmentDate: Timestamp.fromDate(new Date(editFormData.enrollmentDate)),
         photoUrl: editFormData.photoUrl || null,
         updatedAt: serverTimestamp()
@@ -439,7 +465,7 @@ export default function StudentDetail() {
     doc.text(localStudent.name.toUpperCase(), 50, 45);
     doc.text((localStudent.vocation || '-').toUpperCase(), 50, 52);
     doc.text(localStudent.enrollmentDate?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase() || '-', 50, 59);
-    doc.text(activities.length.toString(), 50, 66);
+    doc.text(activities.filter(a => a.category === 'Instruktur').length.toString(), 50, 66);
     
     // Table
     const filteredForPDF = activeCategory === 'Semua' 
@@ -585,11 +611,20 @@ export default function StudentDetail() {
 
           <div className="relative z-10 flex-1">
             <span className="text-[10px] font-black text-indigo-200 dark:text-indigo-300 uppercase tracking-[0.3em] mb-2 block">BIODATA PENERIMA MANFAAT</span>
-            <h2 className="text-5xl font-black tracking-tighter uppercase mb-2">{localStudent.name}</h2>
+            <h2 className="text-5xl font-black tracking-tighter uppercase mb-2 break-words">{localStudent.name}</h2>
             {localStudent.vocation && (
               <p className="text-sm font-black text-indigo-100 dark:text-indigo-200 uppercase tracking-widest mb-4">
                 Vokasional: {localStudent.vocation}
               </p>
+            )}
+            {localStudent.clusters && localStudent.clusters.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {localStudent.clusters.map(cluster => (
+                  <span key={cluster} className="px-3 py-1 bg-white/20 backdrop-blur-md text-white rounded-full text-[10px] font-black uppercase tracking-widest border border-white/20 ring-1 ring-white/10">
+                    {cluster}
+                  </span>
+                ))}
+              </div>
             )}
             <p className="text-lg font-medium text-indigo-100 dark:text-indigo-200 opacity-80 mb-6">
               Masuk: {localStudent.enrollmentDate?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
@@ -597,8 +632,8 @@ export default function StudentDetail() {
             
             <div className="flex gap-12 border-t border-white/10 dark:border-white/5 pt-8">
               <div className="space-y-1">
-                <p className="text-[9px] text-indigo-200 dark:text-indigo-300 uppercase font-black tracking-widest opacity-60">Total Sesi Belajar</p>
-                <p className="text-3xl font-black">{activities.length}</p>
+                <p className="text-[9px] text-indigo-200 dark:text-indigo-300 uppercase font-black tracking-widest opacity-60">Total Sesi Belajar (Instruktur)</p>
+                <p className="text-3xl font-black">{activities.filter(a => a.category === 'Instruktur').length}</p>
               </div>
             </div>
           </div>
@@ -648,10 +683,10 @@ export default function StudentDetail() {
 
           {/* Category Tabs below Header */}
           <div className="flex items-center gap-3 overflow-x-auto pb-6 no-scrollbar border-b border-slate-50 dark:border-slate-800 mb-8">
-            {['Semua', 'Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map((cat) => (
+            {['Semua', ...CATEGORY_OPTIONS].map((cat) => (
               <button
                 key={cat}
-                onClick={() => setActiveCategory(cat as any)}
+                onClick={() => setActiveCategory(cat)}
                 className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all border-2 ${
                   activeCategory === cat 
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
@@ -664,7 +699,7 @@ export default function StudentDetail() {
           </div>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 dark:border-slate-800 text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] px-4">
+            <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 dark:border-slate-800 text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] px-6">
               <div className="col-span-1">Tanggal</div>
               {activeCategory === 'Semua' ? (
                 <>
@@ -677,10 +712,10 @@ export default function StudentDetail() {
               <div className="col-span-3">Hasil Kegiatan</div>
               <div className="col-span-2">Penginput</div>
               <div className="col-span-1 text-center font-black">Berkas</div>
-              <div className="col-span-1 text-right">Aksi</div>
+              <div className="col-span-1 text-center">Aksi</div>
             </div>
 
-            <div className="max-h-[500px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+            <div className="max-h-[500px] overflow-y-auto overflow-x-hidden space-y-2 pr-2 custom-scrollbar">
               {loading ? (
                 <div className="text-center py-20 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Memuat data...</div>
               ) : activities.length === 0 ? (
@@ -689,32 +724,37 @@ export default function StudentDetail() {
                 activities
                   .filter(a => activeCategory === 'Semua' || a.category === activeCategory)
                   .map((activity, idx) => (
-                  <motion.div
-                    key={activity.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="grid grid-cols-12 gap-4 py-5 px-4 border border-slate-50 dark:border-slate-800 rounded-2xl items-center hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all group"
-                  >
-                    <div className="col-span-1 text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                      {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }).toUpperCase()}
-                      <div className="text-[8px] opacity-60 dark:text-slate-500">{activity.date?.toDate().getFullYear()}</div>
-                    </div>
-                    {activeCategory === 'Semua' ? (
-                      <>
-                        <div className="col-span-2">
-                          <span className="text-[8px] font-black px-2 py-1 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg uppercase tracking-widest block md:inline-block truncate max-w-full" title={activity.category}>
-                            {activity.category || 'Peksos'}
-                          </span>
+                    <motion.div 
+                      key={activity.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                      onClick={() => setSelectedActivityForDetail(activity)}
+                      className="grid grid-cols-12 gap-4 py-5 px-6 border border-slate-50 dark:border-slate-800 rounded-2xl items-start hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all group cursor-pointer"
+                    >
+                      <div className="col-span-1 text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors pt-1">
+                        {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }).toUpperCase()}
+                        <div className="text-[8px] opacity-60 dark:text-slate-500">{activity.date?.toDate().getFullYear()}</div>
+                      </div>
+                      {activeCategory === 'Semua' ? (
+                        <>
+                          <div className="col-span-2">
+                            <span className="text-[8px] font-black px-2 py-1 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg uppercase tracking-widest block md:inline-block truncate max-w-full" title={activity.category}>
+                              {activity.category || 'Peksos'}
+                            </span>
+                          </div>
+                          <div className="col-span-2 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100/50 dark:border-slate-800/50 min-w-0">
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium line-clamp-2 break-words">{activity.classActivity}</p>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="col-span-4 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100/50 dark:border-slate-800/50 min-w-0">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium line-clamp-2 break-words">{activity.classActivity}</p>
                         </div>
-                        <div className="col-span-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium line-clamp-2">{activity.classActivity}</div>
-                      </>
-                    ) : (
-                      <div className="col-span-4 text-[11px] text-slate-500 dark:text-slate-400 font-medium line-clamp-2">{activity.classActivity}</div>
-                    )}
-                    <div className="col-span-3 bg-indigo-50/50 dark:bg-indigo-500/5 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-500/10">
-                      <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold italic line-clamp-2">{activity.results}</p>
-                    </div>
+                      )}
+                      <div className="col-span-3 bg-indigo-50/50 dark:bg-indigo-500/5 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-500/10 min-w-0">
+                        <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold italic line-clamp-2 break-words">{activity.results}</p>
+                      </div>
                     <div className="col-span-2 flex items-center gap-2">
                       <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 overflow-hidden shrink-0">
                         <User size={10} />
@@ -756,17 +796,23 @@ export default function StudentDetail() {
                         <span className="text-slate-300 dark:text-slate-700">-</span>
                       )}
                     </div>
-                    <div className="col-span-1 text-right flex items-center justify-end gap-1">
+                    <div className="col-span-1 text-center flex items-center justify-center gap-1">
                       <button 
                         type="button"
-                        onClick={() => openEditActivityModal(activity)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditActivityModal(activity);
+                        }}
                         className="p-2 text-slate-300 dark:text-slate-600 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-all"
                       >
                         <Edit2 size={14} />
                       </button>
                       <button 
                         type="button"
-                        onClick={() => setActivityToDelete(activity)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActivityToDelete(activity);
+                        }}
                         className="p-2 text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-all"
                       >
                         <Trash2 size={14} />
@@ -782,6 +828,97 @@ export default function StudentDetail() {
       </div>
       {/* Modals Section */}
       <AnimatePresence>
+        {/* Activity Detail Modal */}
+        {selectedActivityForDetail && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedActivityForDetail(null)}
+              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden border border-slate-200 dark:border-white/10"
+            >
+              {/* Modal Header */}
+              <div className="px-10 py-8 border-b border-slate-50 dark:border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-6">
+                  <div className="bg-indigo-50 dark:bg-indigo-500/20 p-4 rounded-3xl">
+                    <FileText className="text-indigo-600 dark:text-indigo-400" size={32} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-3xl font-black text-slate-800 dark:text-white uppercase tracking-tight break-words">Detail Kegiatan</h3>
+                    <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">
+                      {selectedActivityForDetail.date?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedActivityForDetail(null)}
+                  className="p-3 text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-2xl transition-all"
+                >
+                  <X size={28} />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-10 space-y-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <div className="min-w-0">
+                  <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-3 underline decoration-indigo-500/30 underline-offset-4">Laporan Kegiatan</label>
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap break-all">
+                    {selectedActivityForDetail.classActivity}
+                  </p>
+                </div>
+                
+                <div className="bg-indigo-50 dark:bg-indigo-500/5 rounded-[2.5rem] p-8 border border-indigo-100 dark:border-indigo-500/10 min-w-0">
+                  <label className="text-[9px] uppercase font-black text-indigo-600 dark:text-indigo-400 tracking-[0.2em] block mb-3">Hasil / Insight Kegiatan</label>
+                  <p className="text-sm font-black italic text-indigo-700 dark:text-indigo-300 leading-relaxed whitespace-pre-wrap break-all">
+                    {selectedActivityForDetail.results}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-50 dark:border-slate-800 pt-8">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+                      <User size={18} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Diinput Oleh</p>
+                      <p className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase">{selectedActivityForDetail.createdByName || '-'}</p>
+                    </div>
+                  </div>
+                  {selectedActivityForDetail.attachment && (
+                    <button 
+                      onClick={() => {
+                        setPreviewAttachment(selectedActivityForDetail.attachment!);
+                        setSelectedActivityForDetail(null);
+                      }}
+                      className="flex items-center gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-mono"
+                    >
+                      <Paperclip size={16} />
+                      Lihat Berkas Lampiran
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+        {imageToCrop && (
+          <ImageCropper
+            image={imageToCrop}
+            onCropComplete={(croppedImage) => {
+              setEditFormData(prev => ({ ...prev, photoUrl: croppedImage }));
+              setImageToCrop(null);
+            }}
+            onCancel={() => setImageToCrop(null)}
+            aspect={1}
+          />
+        )}
         {/* Add Activity Modal */}
         {showAddModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -824,7 +961,7 @@ export default function StudentDetail() {
                       onChange={e => setNewActivity({...newActivity, category: e.target.value as any})}
                       className="w-full px-4 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-bold text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all uppercase tracking-widest appearance-none"
                     >
-                      {['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map(cat => (
+                      {CATEGORY_OPTIONS.map(cat => (
                         <option key={cat} value={cat} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">{cat}</option>
                       ))}
                     </select>
@@ -838,7 +975,7 @@ export default function StudentDetail() {
                     rows={3}
                     value={newActivity.classActivity}
                     onChange={e => setNewActivity({...newActivity, classActivity: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-none outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans"
                     placeholder="Apa laporan kegiatan hari ini?"
                   />
                 </div>
@@ -850,7 +987,7 @@ export default function StudentDetail() {
                     rows={3}
                     value={newActivity.results}
                     onChange={e => setNewActivity({...newActivity, results: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-none outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans mb-4"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans mb-4"
                     placeholder="Bagaimana hasil kegiatannya?"
                   />
                 </div>
@@ -949,7 +1086,7 @@ export default function StudentDetail() {
                     onChange={e => setEditActivityForm({...editActivityForm, category: e.target.value as any})}
                     className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
                   >
-                    {['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map(cat => (
+                    {CATEGORY_OPTIONS.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
@@ -961,7 +1098,7 @@ export default function StudentDetail() {
                     rows={3}
                     value={editActivityForm.classActivity}
                     onChange={e => setEditActivityForm({...editActivityForm, classActivity: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-none outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-y min-h-[100px] outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
                   />
                 </div>
                 <div>
@@ -971,7 +1108,7 @@ export default function StudentDetail() {
                     rows={3}
                     value={editActivityForm.results}
                     onChange={e => setEditActivityForm({...editActivityForm, results: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-none outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-y min-h-[100px] outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
                   />
                 </div>
 
@@ -1063,19 +1200,20 @@ export default function StudentDetail() {
 
         {/* Edit Student Modal */}
         {showEditModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto custom-scrollbar">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowEditModal(false)}
-              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" 
+              className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm" 
             />
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-transparent dark:border-white/10"
+              onClick={(e) => e.stopPropagation()}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-transparent dark:border-white/10 my-8"
             >
               <div className="flex items-center gap-4 mb-8">
                 <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center">
@@ -1144,6 +1282,16 @@ export default function StudentDetail() {
                     placeholder="Contoh: Menjahit, Tata Boga"
                   />
                 </div>
+                <div>
+                  <MultiSelect
+                    label="Klaster (Bisa Pilih Lebih Dari Satu)"
+                    options={CLUSTER_OPTIONS}
+                    selected={editFormData.clusters}
+                    onChange={(selected) => setEditFormData({ ...editFormData, clusters: selected })}
+                    placeholder="Pilih Klaster..."
+                  />
+                </div>
+
                 <div>
                   <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Tanggal Masuk</label>
                   <input

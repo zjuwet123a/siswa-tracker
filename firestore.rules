@@ -23,6 +23,13 @@ service cloud.firestore {
       return resource.data;
     }
 
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'akundatakantor@gmail.com' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
     // Student Validation
     function isValidStudent(data) {
       return data.keys().hasAll(['name', 'enrollmentDate', 'createdAt']) &&
@@ -31,6 +38,7 @@ service cloud.firestore {
              data.createdAt is timestamp &&
              (data.get('photoUrl', null) == null || (data.photoUrl is string && data.photoUrl.size() <= 1000000)) &&
              (data.get('vocation', null) == null || (data.vocation is string && data.vocation.size() <= 100)) &&
+             (data.get('clusters', null) == null || data.clusters is list) &&
              (data.get('updatedAt', null) == null || data.updatedAt is timestamp);
     }
 
@@ -39,7 +47,7 @@ service cloud.firestore {
       return data.keys().hasAll(['studentId', 'date', 'category', 'classActivity', 'results', 'attachment', 'createdAt']) &&
              data.studentId is string && isValidId(data.studentId) &&
              data.date is timestamp &&
-             data.category in ['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'] &&
+             data.category is string && data.category.size() > 0 &&
              data.classActivity is string && data.classActivity.size() > 0 && data.classActivity.size() <= 2000 &&
              data.results is string && data.results.size() > 0 && data.results.size() <= 2000 &&
              (data.attachment == null || (
@@ -71,6 +79,21 @@ service cloud.firestore {
                     (incoming().studentId == studentId) && 
                     (incoming().createdAt == existing().createdAt);
       allow delete: if isSignedIn();
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /clusters/{clusterId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // Collection group for dashboard stats

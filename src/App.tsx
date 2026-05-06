@@ -7,10 +7,14 @@ import Dashboard from './components/Dashboard';
 import StudentList from './components/StudentList';
 import StudentDetail from './components/StudentDetail';
 import Login from './components/Login';
+import AdminPanel from './components/AdminPanel';
 import { Loader2 } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from './lib/firebase';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -22,18 +26,24 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
-  }, [isDarkMode]);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        // Check if admin
+        if (currentUser.email === 'akundatakantor@gmail.com') {
+          setIsAdmin(true);
+        } else {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+            setIsAdmin(userDoc.exists() && userDoc.data().role === 'admin');
+          } catch (error) {
+            console.error('Error checking admin status:', error);
+            setIsAdmin(false);
+          }
+        }
+      } else {
+        setIsAdmin(false);
+      }
       setLoading(false);
     });
     return () => unsubscribe();
@@ -67,6 +77,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/penerima-manfaat" element={<StudentList />} />
           <Route path="/profile/:studentId" element={<StudentDetail />} />
+          {isAdmin && <Route path="/admin" element={<AdminPanel />} />}
           <Route path="/login" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
