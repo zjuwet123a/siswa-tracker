@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, addDoc, deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
 import { Cluster, Category, UserData } from '../types';
-import { Plus, Trash2, Users, Layers, Tag, Shield, Loader2, UserPlus, Mail, Lock, CheckCircle2, AlertCircle, LogOut, Pencil, UserCog } from 'lucide-react';
+import { Plus, Trash2, Users, Layers, Tag, Shield, Loader2, UserPlus, Mail, Lock, CheckCircle2, AlertCircle, LogOut, Pencil, UserCog, Image as ImageIcon, GraduationCap, Upload, Crop } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Cropper from 'react-easy-crop';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-type Tab = 'add_user' | 'all_users' | 'active_users' | 'clusters' | 'categories';
+type Tab = 'add_user' | 'all_users' | 'active_users' | 'clusters' | 'categories' | 'settings';
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('add_user');
@@ -44,6 +45,25 @@ export default function AdminPanel() {
   const [userInputDeleteCode, setUserInputDeleteCode] = useState('');
   const [deleteUserLoading, setDeleteUserLoading] = useState(false);
 
+  // Edit Item (Cluster/Category) States
+  const [editingItem, setEditingItem] = useState<{ id: string, name: string, type: 'clusters' | 'categories' } | null>(null);
+  const [updateItemName, setUpdateItemName] = useState('');
+  const [updateItemLoading, setUpdateItemLoading] = useState(false);
+
+  // Settings States
+  const [logoUrl, setLogoUrl] = useState('');
+  const [saveSettingsLoading, setSaveSettingsLoading] = useState(false);
+  
+  // Active User Search State
+  const [activeUserSearch, setActiveUserSearch] = useState('');
+  
+  // Image Upload & Crop States
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
+  const [isCropping, setIsCropping] = useState(false);
+
   const generateRandomCode = () => {
     return Math.random().toString(36).substring(2, 7).toUpperCase();
   };
@@ -55,6 +75,12 @@ export default function AdminPanel() {
 
     const unsubCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
       setCategories(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Category)));
+    });
+
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'website'), (snapshot) => {
+      if (snapshot.exists()) {
+        setLogoUrl(snapshot.data().logoUrl || '');
+      }
     });
 
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -69,9 +95,102 @@ export default function AdminPanel() {
     return () => {
       unsubClusters();
       unsubCategories();
+      unsubSettings();
       unsubUsers();
     };
   }, []);
+
+  const handleUpdateSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaveSettingsLoading(true);
+    try {
+      await setDoc(doc(db, 'settings', 'website'), {
+        logoUrl: logoUrl.trim(),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      alert('Pengaturan website berhasil diperbarui.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'settings/website');
+    } finally {
+      setSaveSettingsLoading(false);
+    }
+  };
+
+  const onCropComplete = (_croppedArea: any, croppedAreaPixels: any) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  };
+
+  const createImage = (url: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+      const image = new Image();
+      image.addEventListener('load', () => resolve(image));
+      image.addEventListener('error', (error) => reject(error));
+      image.setAttribute('crossOrigin', 'anonymous');
+      image.src = url;
+    });
+
+  const getCroppedImg = async (imageSrc: string, pixelCrop: any): Promise<string> => {
+    const image = await createImage(imageSrc);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return '';
+
+    canvas.width = pixelCrop.width;
+    canvas.height = pixelCrop.height;
+
+    ctx.drawImage(
+      image,
+      pixelCrop.x,
+      pixelCrop.y,
+      pixelCrop.width,
+      pixelCrop.height,
+      0,
+      0,
+      pixelCrop.width,
+      pixelCrop.height
+    );
+
+    return canvas.toDataURL('image/jpeg', 0.9);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validation: Type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!validTypes.includes(file.type)) {
+      alert('Format file tidak didukung. Gunakan JPG, JPEG, atau PNG.');
+      return;
+    }
+
+    // Validation: Size (500KB)
+    if (file.size > 500 * 1024) {
+      alert('Ukuran file terlalu besar. Maksimal 500 KB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelectedImage(reader.result as string);
+      setIsCropping(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const applyCrop = async () => {
+    if (!selectedImage || !croppedAreaPixels) return;
+    try {
+      const croppedImage = await getCroppedImg(selectedImage, croppedAreaPixels);
+      setLogoUrl(croppedImage);
+      setIsCropping(false);
+      setSelectedImage(null);
+    } catch (e) {
+      console.error(e);
+      alert('Gagal memproses gambar.');
+    }
+  };
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +217,27 @@ export default function AdminPanel() {
       await deleteDoc(doc(db, collName, id));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${activeTab}/${id}`);
+    }
+  };
+
+  const handleEditItem = (id: string, name: string, type: 'clusters' | 'categories') => {
+    setEditingItem({ id, name, type });
+    setUpdateItemName(name);
+  };
+
+  const executeUpdateItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem || !updateItemName.trim()) return;
+    setUpdateItemLoading(true);
+    try {
+      await updateDoc(doc(db, editingItem.type, editingItem.id), {
+        name: updateItemName.trim()
+      });
+      setEditingItem(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${editingItem.type}/${editingItem.id}`);
+    } finally {
+      setUpdateItemLoading(false);
     }
   };
 
@@ -216,20 +356,58 @@ export default function AdminPanel() {
     }
   };
 
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshTrigger(prev => prev + 1);
+    }, 60000); // Refresh every minute to update status labels
+    return () => clearInterval(interval);
+  }, []);
+
   const getActiveUsers = () => {
-    // Show users active in the last 30 minutes in the "Active" tab
-    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+    // Show users active in the last 15 minutes
+    const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
     return users.filter(u => {
+      // Don't show super admin as requested
       if (u.email === 'akundatakantor@gmail.com') return false;
-      const lastActive = u.lastActive?.toDate?.()?.getTime() || 0;
-      return lastActive > thirtyMinutesAgo;
+      
+      const lastActiveTs = u.lastActive;
+      let lastActiveMillis = 0;
+      
+      if (lastActiveTs?.toDate) {
+        lastActiveMillis = lastActiveTs.toDate().getTime();
+      } else if (lastActiveTs instanceof Date) {
+        lastActiveMillis = lastActiveTs.getTime();
+      } else if (typeof lastActiveTs === 'number') {
+        lastActiveMillis = lastActiveTs;
+      }
+      
+      const isActive = lastActiveMillis > fifteenMinutesAgo;
+      if (!isActive) return false;
+
+      // Search filter
+      if (activeUserSearch.trim()) {
+        const search = activeUserSearch.toLowerCase();
+        return (u.displayName?.toLowerCase().includes(search) || u.email?.toLowerCase().includes(search));
+      }
+
+      return true;
     });
   };
 
   const getStatusInfo = (lastActiveTs: any) => {
-    const lastActive = lastActiveTs?.toDate?.()?.getTime() || 0;
+    let lastActiveMillis = 0;
+    
+    if (lastActiveTs?.toDate) {
+      lastActiveMillis = lastActiveTs.toDate().getTime();
+    } else if (lastActiveTs instanceof Date) {
+      lastActiveMillis = lastActiveTs.getTime();
+    } else if (typeof lastActiveTs === 'number') {
+      lastActiveMillis = lastActiveTs;
+    }
+
     const now = Date.now();
-    const diff = now - lastActive;
+    const diff = now - lastActiveMillis;
 
     if (diff < 5 * 60 * 1000) {
       return { label: 'Online', color: 'bg-emerald-500', text: 'text-emerald-500' };
@@ -331,6 +509,17 @@ export default function AdminPanel() {
           >
             <Tag size={14} />
             Penyusun
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`flex-1 flex items-center justify-center gap-3 py-4 text-[9px] font-black uppercase tracking-widest transition-all rounded-2xl ${
+              activeTab === 'settings' 
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
+                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+            }`}
+          >
+            <ImageIcon size={14} />
+            Settings
           </button>
         </div>
 
@@ -524,11 +713,25 @@ export default function AdminPanel() {
             </div>
           ) : activeTab === 'active_users' ? (
             <div className="max-w-2xl mx-auto space-y-6">
-              <div className="flex items-center gap-3 mb-6">
-                <Users className="text-indigo-600" size={20} />
-                <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">Daftar Pengguna Aktif</h3>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                <div className="flex items-center gap-3">
+                  <Users className="text-indigo-600" size={20} />
+                  <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">Daftar Pengguna Aktif</h3>
+                </div>
+                
+                <div className="relative flex-1 max-w-xs">
+                  <Plus className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 rotate-45" size={16} />
+                  <input
+                    type="text"
+                    placeholder="CARI PENGGUNA AKTIF..."
+                    value={activeUserSearch}
+                    onChange={(e) => setActiveUserSearch(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-white focus:bg-white outline-none transition-all"
+                  />
+                </div>
               </div>
-              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+
+              <div className="space-y-3 max-h-[380px] overflow-y-auto pr-2 custom-scrollbar">
                 {activeUsersList.length === 0 ? (
                   <div className="py-12 flex flex-col items-center gap-4 text-center bg-slate-50 dark:bg-slate-800/50 rounded-[2rem] border border-dashed border-slate-200 dark:border-slate-700">
                     <Users className="w-12 h-12 text-slate-300" />
@@ -588,6 +791,93 @@ export default function AdminPanel() {
                 })
               )}
             </div>
+            <div className="flex items-center justify-center gap-2 mt-8 opacity-50">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">DATA AKAN DI UPDATE SECARA OTOMATIS SETIAP 1 MENIT</p>
+            </div>
+          </div>
+          ) : activeTab === 'settings' ? (
+            <div className="max-w-xl mx-auto space-y-8">
+              <div className="flex items-center gap-3 mb-4">
+                <ImageIcon className="text-indigo-600" size={20} />
+                <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">Pengaturan Website</h3>
+              </div>
+
+              <div className="p-8 bg-slate-50 dark:bg-slate-800/50 rounded-[2.5rem] border border-slate-100 dark:border-slate-700">
+                <form onSubmit={handleUpdateSettings} className="space-y-6">
+                  <div className="space-y-4 flex flex-col items-center mb-6">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pratinjau Logo Saat Ini</p>
+                    <div className="w-24 h-24 rounded-3xl bg-white dark:bg-slate-900 shadow-xl flex items-center justify-center p-2 border border-slate-100 dark:border-slate-800">
+                      {logoUrl ? (
+                        <img src={logoUrl} alt="Preview" className="w-full h-full object-contain" />
+                      ) : (
+                        <GraduationCap className="w-12 h-12 text-indigo-600" />
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <label className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Upload Logo</label>
+                    <div className="flex items-center gap-4">
+                      <label className="flex-1 cursor-pointer group">
+                        <div className="w-full h-32 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-[2rem] flex flex-col items-center justify-center gap-2 group-hover:border-indigo-500 group-hover:bg-indigo-50/50 dark:group-hover:bg-indigo-500/5 transition-all">
+                          <Upload className="text-slate-400 group-hover:text-indigo-600 transition-colors" size={24} />
+                          <span className="text-[10px] font-black text-slate-400 group-hover:text-indigo-600 uppercase tracking-widest">Pilih Gambar</span>
+                          <input type="file" accept="image/png, image/jpeg, image/jpg" onChange={handleFileChange} className="hidden" />
+                        </div>
+                      </label>
+                      
+                      {logoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setLogoUrl('')}
+                          className="p-4 bg-rose-50 dark:bg-rose-500/10 text-rose-600 rounded-2xl hover:bg-rose-100 transition-all border border-rose-100 dark:border-rose-900/30"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Atau Gunakan URL Gambar</label>
+                    <div className="relative">
+                      <ImageIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                      <input
+                        type="url"
+                        value={logoUrl}
+                        onChange={(e) => setLogoUrl(e.target.value)}
+                        placeholder="https://example.com/logo.png"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl py-3.5 pl-12 pr-4 text-sm font-medium dark:text-white focus:border-indigo-600 outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={saveSettingsLoading}
+                    className="w-full bg-indigo-600 text-white rounded-2xl py-4 font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-indigo-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                  >
+                    {saveSettingsLoading ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      'Simpan Pengaturan'
+                    )}
+                  </button>
+                </form>
+              </div>
+              
+              <div className="p-6 bg-amber-50 dark:bg-amber-500/5 rounded-2xl border border-amber-100 dark:border-amber-500/10 mt-6">
+                <div className="flex gap-4">
+                  <AlertCircle className="text-amber-500 shrink-0" size={18} />
+                  <div>
+                    <h4 className="text-[10px] font-black text-amber-800 dark:text-amber-200 uppercase tracking-widest mb-1">Ketentuan File</h4>
+                    <p className="text-[9px] font-bold text-amber-700 dark:text-amber-400 uppercase leading-relaxed">
+                      Format: JPG, JPEG, PNG • Ukuran Maks: 500 KB. Gunakan alat potong untuk menyesuaikan area logo.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="space-y-8">
@@ -626,12 +916,20 @@ export default function AdminPanel() {
                         </div>
                         <span className="text-[11px] font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">{item.name}</span>
                       </div>
-                      <button
-                        onClick={() => handleDeleteItem(item.id)}
-                        className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl transition-all"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleEditItem(item.id, item.name, activeTab === 'clusters' ? 'clusters' : 'categories')}
+                          className="p-3 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteItem(item.id)}
+                          className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl transition-all"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </motion.div>
                   ))}
                 </AnimatePresence>
@@ -640,6 +938,159 @@ export default function AdminPanel() {
           )}
         </div>
       </div>
+
+      {/* Image Crop Modal */}
+      <AnimatePresence>
+        {isCropping && selectedImage && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-[3rem] overflow-hidden shadow-2xl flex flex-col h-[80vh]"
+            >
+              <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-white dark:bg-slate-900 z-10">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 rounded-2xl">
+                    <Crop size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Sesuaikan Logo</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Geser dan perbesar sesuai kebutuhan</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setIsCropping(false); setSelectedImage(null); }}
+                  className="p-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all"
+                >
+                  <Plus size={24} className="rotate-45" />
+                </button>
+              </div>
+
+              <div className="relative flex-1 bg-slate-100 dark:bg-slate-950">
+                <Cropper
+                  image={selectedImage}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  onCropChange={setCrop}
+                  onCropComplete={onCropComplete}
+                  onZoomChange={setZoom}
+                />
+              </div>
+
+              <div className="p-8 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 space-y-6 z-10">
+                <div className="flex items-center gap-6">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Zoom</span>
+                  <input
+                    type="range"
+                    value={zoom}
+                    min={1}
+                    max={3}
+                    step={0.1}
+                    aria-labelledby="Zoom"
+                    onChange={(e) => setZoom(Number(e.target.value))}
+                    className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => { setIsCropping(false); setSelectedImage(null); }}
+                    className="py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all border border-slate-100 dark:border-slate-800"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={applyCrop}
+                    className="py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-100 dark:shadow-none transition-all flex items-center justify-center gap-2"
+                  >
+                    Terapkan Potongan
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Item Modal */}
+      <AnimatePresence>
+        {editingItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !updateItemLoading && setEditingItem(null)}
+              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 p-8 overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-indigo-600" />
+              <div className="space-y-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center text-indigo-600">
+                    <Pencil size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Edit {editingItem.type === 'clusters' ? 'Klaster' : 'Penyusun'}</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Perbarui Nama Item</p>
+                  </div>
+                </div>
+
+                <form onSubmit={executeUpdateItem} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Nama {editingItem.type === 'clusters' ? 'Klaster' : 'Penyusun'}</label>
+                    <input
+                      type="text"
+                      required
+                      value={updateItemName}
+                      onChange={(e) => setUpdateItemName(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl py-4 px-6 text-sm font-medium dark:text-white focus:bg-white focus:border-indigo-600 outline-none transition-all uppercase"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingItem(null)}
+                      disabled={updateItemLoading}
+                      className="py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all border border-slate-100 dark:border-slate-800"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={updateItemLoading || !updateItemName.trim() || updateItemName === editingItem.name}
+                      className="py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                    >
+                      {updateItemLoading ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          Menyimpan...
+                        </>
+                      ) : (
+                        'Simpan Perubahan'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Delete User Confirmation Modal */}
       <AnimatePresence>

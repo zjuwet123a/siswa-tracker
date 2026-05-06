@@ -84,6 +84,17 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        isSignedIn() && 
+        request.auth.uid == userId && 
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastActive'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
       allow write: if isAdmin();
     }
 

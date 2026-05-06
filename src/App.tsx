@@ -26,6 +26,16 @@ export default function App() {
   });
 
   useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -78,11 +88,11 @@ export default function App() {
     if (!user) return;
 
     // Activity tracking
-    let lastUpdate = Date.now();
+    let lastUpdate = 0;
     const updateActivity = async () => {
       const now = Date.now();
-      // Only update once every 2 minutes to save database writes
-      if (now - lastUpdate > 2 * 60 * 1000) {
+      // Only update once every 3 minutes to save database writes (enough for "Online" status check which is 5 mins)
+      if (now - lastUpdate > 3 * 60 * 1000) {
         lastUpdate = now;
         try {
           await updateDoc(doc(db, 'users', user.uid), {
@@ -94,9 +104,15 @@ export default function App() {
       }
     };
 
+    // Trigger initial activity update
+    updateActivity();
+
     window.addEventListener('mousemove', updateActivity);
     window.addEventListener('keydown', updateActivity);
     window.addEventListener('click', updateActivity);
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') updateActivity();
+    });
 
     const unsubUser = onSnapshot(doc(db, 'users', user.uid), async (snapshot) => {
       const data = snapshot.data();

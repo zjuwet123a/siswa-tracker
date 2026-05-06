@@ -5,7 +5,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { auth } from '../lib/firebase';
 import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider, createUserWithEmailAndPassword, getAuth, updateProfile } from 'firebase/auth';
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getDoc, doc } from 'firebase/firestore';
+import { getDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -24,6 +24,15 @@ export default function Layout({ children, isDarkMode, setIsDarkMode }: LayoutPr
   const user = auth.currentUser;
   const [isAdmin, setIsAdmin] = React.useState(user?.email === 'akundatakantor@gmail.com');
   const [isProfileOpen, setIsProfileOpen] = React.useState(false);
+  const [websiteSettings, setWebsiteSettings] = React.useState<{ logoUrl?: string }>({});
+
+  React.useEffect(() => {
+    return onSnapshot(doc(db, 'settings', 'website'), (snapshot) => {
+      if (snapshot.exists()) {
+        setWebsiteSettings(snapshot.data());
+      }
+    });
+  }, []);
   const [showPasswordModal, setShowPasswordModal] = React.useState(false);
   const [newPassword, setNewPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
@@ -135,9 +144,15 @@ export default function Layout({ children, isDarkMode, setIsDarkMode }: LayoutPr
       {/* Header */}
       <header className="max-w-7xl mx-auto w-full flex flex-col md:flex-row justify-between items-center mb-8 gap-6 pt-4">
         <div className="flex items-center gap-4">
-          <div className="p-3 bg-indigo-600 rounded-2xl shadow-xl shadow-indigo-100 dark:shadow-none rotate-3">
-            <GraduationCap className="w-8 h-8 text-white" />
-          </div>
+          {websiteSettings.logoUrl ? (
+            <div className="w-14 h-14 rounded-2xl shadow-xl overflow-hidden bg-white dark:bg-slate-800 flex items-center justify-center p-1">
+              <img src={websiteSettings.logoUrl} alt="Logo" className="w-full h-full object-contain" />
+            </div>
+          ) : (
+            <div className="p-3 bg-indigo-600 rounded-2xl shadow-xl shadow-indigo-100 dark:shadow-none rotate-3">
+              <GraduationCap className="w-8 h-8 text-white" />
+            </div>
+          )}
           <div>
             <h1 className="text-2xl font-black tracking-tighter text-slate-800 dark:text-slate-100 uppercase leading-none">
               DATA PERKEMBANGAN PM
