@@ -6,9 +6,12 @@
   --font-display: "Outfit", sans-serif;
 }
 
+/* Memastikan mode gelap dipicu oleh kelas .dark pada elemen root */
+@variant dark (&:where(.dark, .dark *));
+
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+    @apply bg-slate-50 text-slate-900 font-sans antialiased transition-colors duration-300;
   }
 }
 

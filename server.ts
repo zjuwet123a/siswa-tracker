@@ -65,7 +65,8 @@ async function startServer() {
 
       res.json({ success: true, fileId: response.data.id, link: response.data.webViewLink });
     } catch (error: any) {
-      console.error("Backup error detail:", error.response?.data || error);
+      const errorData = error.response?.data || error;
+      console.error("Backup error detail:", JSON.stringify(errorData, null, 2));
       
       const isNotFound = error.code === 404 || error.response?.status === 404;
       if (isNotFound) {
@@ -74,7 +75,10 @@ async function startServer() {
         });
       }
 
-      res.status(500).json({ error: error.message || "Failed to backup to Google Drive" });
+      res.status(500).json({ 
+        error: error.message || "Failed to backup to Google Drive",
+        detail: errorData
+      });
     }
   });
 

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
 import { Student, Activity } from '../types';
-import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2 } from 'lucide-react';
+import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2, Eye, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -24,6 +24,38 @@ export default function StudentDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [studentNotFound, setStudentNotFound] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<Activity['attachment'] | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Effect to handle Blob URL creation and cleanup for PDF previews
+  useEffect(() => {
+    if (previewAttachment && previewAttachment.type === 'application/pdf') {
+      try {
+        // Convert base64 to Blob
+        const base64Data = previewAttachment.base64.split(',')[1];
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        
+        const url = URL.createObjectURL(blob);
+        setPreviewUrl(url);
+
+        return () => {
+          URL.revokeObjectURL(url);
+          setPreviewUrl(null);
+        };
+      } catch (e) {
+        console.error("Gagal membuat URL preview PDF:", e);
+        setPreviewUrl(null);
+      }
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [previewAttachment]);
   const [newActivity, setNewActivity] = useState<{
     date: string;
     category: Activity['category'];
@@ -489,7 +521,7 @@ export default function StudentDetail() {
         </div>
         <button
           onClick={() => navigate('/penerima-manfaat')}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-100"
+          className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-100 dark:shadow-none"
         >
           <ArrowLeft size={16} />
           Kembali ke Daftar
@@ -504,13 +536,13 @@ export default function StudentDetail() {
       <div className="flex items-center justify-between">
         <button
           onClick={() => navigate('/penerima-manfaat')}
-          className="group flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-indigo-600 transition-colors"
+          className="group flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500 hover:text-indigo-600 transition-colors"
         >
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
           Kembali ke Daftar
         </button>
         {error && (
-          <div className="bg-rose-50 border border-rose-100 px-4 py-2 rounded-xl flex items-center gap-2 text-rose-600 animate-pulse">
+          <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 px-4 py-2 rounded-xl flex items-center gap-2 text-rose-600 animate-pulse">
             <AlertCircle size={14} />
             <span className="text-[8px] font-black uppercase tracking-widest">{error}</span>
           </div>
@@ -519,7 +551,7 @@ export default function StudentDetail() {
           <button
             type="button"
             onClick={() => setShowEditModal(true)}
-            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 hover:text-indigo-700 transition-all px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-100"
+            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-all px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800"
           >
             <Edit2 size={16} />
             Edit Profile
@@ -527,7 +559,7 @@ export default function StudentDetail() {
           <button
             type="button"
             onClick={() => setShowDeleteStudentModal(true)}
-            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-rose-400 hover:text-rose-600 transition-all px-4 py-2 rounded-xl"
+            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-rose-400 dark:text-rose-500 hover:text-rose-600 transition-all px-4 py-2 rounded-xl"
           >
             <Trash2 size={16} />
             Hapus Penerima Manfaat
@@ -539,11 +571,11 @@ export default function StudentDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Profile Card */}
-        <div className="lg:col-span-12 bg-indigo-600 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl flex flex-col md:flex-row md:items-center gap-10 min-h-[300px]">
+        <div className="lg:col-span-12 bg-indigo-600 dark:bg-indigo-900 rounded-[3rem] p-10 text-white relative overflow-hidden shadow-2xl flex flex-col md:flex-row md:items-center gap-10 min-h-[300px]">
           <div className="absolute top-[-30px] right-[-30px] w-64 h-64 bg-white/10 rounded-full blur-3xl animate-pulse" />
           
           {/* Profile Photo */}
-          <div className="relative z-10 w-48 h-48 rounded-[2.5rem] bg-indigo-500/30 border-4 border-white/20 overflow-hidden flex-shrink-0 shadow-2xl flex items-center justify-center">
+          <div className="relative z-10 w-48 h-48 rounded-[2.5rem] bg-indigo-500/30 dark:bg-black/20 border-4 border-white/20 overflow-hidden flex-shrink-0 shadow-2xl flex items-center justify-center">
             {localStudent.photoUrl ? (
               <img src={localStudent.photoUrl} alt={localStudent.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             ) : (
@@ -552,20 +584,20 @@ export default function StudentDetail() {
           </div>
 
           <div className="relative z-10 flex-1">
-            <span className="text-[10px] font-black text-indigo-200 uppercase tracking-[0.3em] mb-2 block">BIODATA PENERIMA MANFAAT</span>
+            <span className="text-[10px] font-black text-indigo-200 dark:text-indigo-300 uppercase tracking-[0.3em] mb-2 block">BIODATA PENERIMA MANFAAT</span>
             <h2 className="text-5xl font-black tracking-tighter uppercase mb-2">{localStudent.name}</h2>
             {localStudent.vocation && (
-              <p className="text-sm font-black text-indigo-100 uppercase tracking-widest mb-4">
+              <p className="text-sm font-black text-indigo-100 dark:text-indigo-200 uppercase tracking-widest mb-4">
                 Vokasional: {localStudent.vocation}
               </p>
             )}
-            <p className="text-lg font-medium text-indigo-100 opacity-80 mb-6">
+            <p className="text-lg font-medium text-indigo-100 dark:text-indigo-200 opacity-80 mb-6">
               Masuk: {localStudent.enrollmentDate?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
             
-            <div className="flex gap-12 border-t border-white/10 pt-8">
+            <div className="flex gap-12 border-t border-white/10 dark:border-white/5 pt-8">
               <div className="space-y-1">
-                <p className="text-[9px] text-indigo-200 uppercase font-black tracking-widest opacity-60">Total Sesi Belajar</p>
+                <p className="text-[9px] text-indigo-200 dark:text-indigo-300 uppercase font-black tracking-widest opacity-60">Total Sesi Belajar</p>
                 <p className="text-3xl font-black">{activities.length}</p>
               </div>
             </div>
@@ -573,9 +605,9 @@ export default function StudentDetail() {
         </div>
 
         {/* History Table Card */}
-        <div className="lg:col-span-12 bg-white border border-slate-200 rounded-[3rem] p-10 flex flex-col shadow-sm">
+        <div className="lg:col-span-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[3rem] p-10 flex flex-col shadow-sm">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3 shrink-0">
+            <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight flex items-center gap-3 shrink-0">
               <div className="w-2 h-8 bg-indigo-600 rounded-full" />
               RIWAYAT PENERIMA MANFAAT
             </h3>
@@ -583,7 +615,7 @@ export default function StudentDetail() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest px-6 py-2.5 rounded-full bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 shrink-0"
+                className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest px-6 py-2.5 rounded-full bg-slate-900 dark:bg-indigo-600 text-white hover:bg-slate-800 dark:hover:bg-indigo-500 transition-all shadow-lg shadow-slate-200 dark:shadow-none shrink-0"
               >
                 <Plus size={14} />
                 Input Laporan
@@ -594,8 +626,8 @@ export default function StudentDetail() {
                 disabled={isDriveConnecting}
                 className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-all ${
                   googleAccessToken 
-                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
-                    : 'bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100'
+                    ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-500/20' 
+                    : 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-500/20 hover:bg-rose-100 dark:hover:bg-rose-500/20'
                 }`}
               >
                 <Share2 size={14} className={isDriveConnecting ? 'animate-spin' : ''} />
@@ -605,7 +637,7 @@ export default function StudentDetail() {
               {activities.length > 0 && (
                 <button 
                   onClick={handleExportPDF}
-                  className="flex items-center gap-2 text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-colors shrink-0"
+                  className="flex items-center gap-2 text-[9px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50 dark:bg-indigo-900/30 px-4 py-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shrink-0"
                 >
                   <Download size={14} />
                   Export
@@ -615,15 +647,15 @@ export default function StudentDetail() {
           </div>
 
           {/* Category Tabs below Header */}
-          <div className="flex items-center gap-3 overflow-x-auto pb-6 no-scrollbar border-b border-slate-50 mb-8">
+          <div className="flex items-center gap-3 overflow-x-auto pb-6 no-scrollbar border-b border-slate-50 dark:border-slate-800 mb-8">
             {['Semua', 'Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map((cat) => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat as any)}
                 className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all border-2 ${
                   activeCategory === cat 
-                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100' 
-                    : 'bg-white border-slate-100 text-slate-400 hover:border-indigo-100 hover:text-slate-600'
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none' 
+                    : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:border-indigo-100 dark:hover:border-indigo-900 hover:text-slate-600 dark:hover:text-slate-300'
                 }`}
               >
                 {cat}
@@ -632,7 +664,7 @@ export default function StudentDetail() {
           </div>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] px-4">
+            <div className="grid grid-cols-12 gap-4 pb-4 border-b-2 border-slate-50 dark:border-slate-800 text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] px-4">
               <div className="col-span-1">Tanggal</div>
               {activeCategory === 'Semua' ? (
                 <>
@@ -650,9 +682,9 @@ export default function StudentDetail() {
 
             <div className="max-h-[500px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
               {loading ? (
-                <div className="text-center py-20 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memuat data...</div>
+                <div className="text-center py-20 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Memuat data...</div>
               ) : activities.length === 0 ? (
-                <div className="text-center py-20 text-[10px] font-black text-slate-300 uppercase tracking-widest italic">Belum ada data aktivitas terdaftar</div>
+                <div className="text-center py-20 text-[10px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-widest italic">Belum ada data aktivitas terdaftar</div>
               ) : (
                 activities
                   .filter(a => activeCategory === 'Semua' || a.category === activeCategory)
@@ -662,51 +694,58 @@ export default function StudentDetail() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    className="grid grid-cols-12 gap-4 py-5 px-4 border border-slate-50 rounded-2xl items-center hover:bg-slate-50 transition-all group"
+                    className="grid grid-cols-12 gap-4 py-5 px-4 border border-slate-50 dark:border-slate-800 rounded-2xl items-center hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all group"
                   >
-                    <div className="col-span-1 text-[11px] font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">
+                    <div className="col-span-1 text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                       {activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }).toUpperCase()}
-                      <div className="text-[8px] opacity-60">{activity.date?.toDate().getFullYear()}</div>
+                      <div className="text-[8px] opacity-60 dark:text-slate-500">{activity.date?.toDate().getFullYear()}</div>
                     </div>
                     {activeCategory === 'Semua' ? (
                       <>
                         <div className="col-span-2">
-                          <span className="text-[8px] font-black px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg uppercase tracking-widest block md:inline-block truncate max-w-full" title={activity.category}>
+                          <span className="text-[8px] font-black px-2 py-1 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg uppercase tracking-widest block md:inline-block truncate max-w-full" title={activity.category}>
                             {activity.category || 'Peksos'}
                           </span>
                         </div>
-                        <div className="col-span-2 text-[11px] text-slate-500 font-medium line-clamp-2">{activity.classActivity}</div>
+                        <div className="col-span-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium line-clamp-2">{activity.classActivity}</div>
                       </>
                     ) : (
-                      <div className="col-span-4 text-[11px] text-slate-500 font-medium line-clamp-2">{activity.classActivity}</div>
+                      <div className="col-span-4 text-[11px] text-slate-500 dark:text-slate-400 font-medium line-clamp-2">{activity.classActivity}</div>
                     )}
-                    <div className="col-span-3 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50">
-                      <p className="text-[11px] text-indigo-600 font-bold italic line-clamp-2">{activity.results}</p>
+                    <div className="col-span-3 bg-indigo-50/50 dark:bg-indigo-500/5 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-500/10">
+                      <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold italic line-clamp-2">{activity.results}</p>
                     </div>
                     <div className="col-span-2 flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 overflow-hidden shrink-0">
+                      <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 overflow-hidden shrink-0">
                         <User size={10} />
                       </div>
-                      <div className="text-[9px] font-black text-slate-500 uppercase truncate">
+                      <div className="text-[9px] font-black text-slate-500 dark:text-slate-500 uppercase truncate">
                         {activity.createdByName || '-'}
                       </div>
                     </div>
                     <div className="col-span-1 flex items-center justify-center gap-2">
                        {activity.attachment ? (
-                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                          <button 
+                            onClick={() => setPreviewAttachment(activity.attachment!)}
+                            className="p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm rounded-lg transition-all"
+                            title={`Preview: ${activity.attachment.name}`}
+                          >
+                            <Eye size={16} />
+                          </button>
                           <button 
                             onClick={() => downloadAttachment(activity.attachment)}
-                            className="p-1.5 text-indigo-600 hover:bg-white hover:shadow-sm rounded-lg transition-all"
+                            className="p-1.5 text-slate-500 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm rounded-lg transition-all"
                             title={`Unduh: ${activity.attachment.name}`}
                           >
-                            <FileText size={16} />
+                            <Download size={14} />
                           </button>
                           {activity.attachment.driveViewLink && (
                             <a 
                               href={activity.attachment.driveViewLink} 
                               target="_blank" 
                               rel="noreferrer"
-                              className="p-1.5 text-emerald-500 hover:bg-white hover:shadow-sm rounded-lg transition-all"
+                              className="p-1.5 text-emerald-500 dark:text-emerald-400 hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm rounded-lg transition-all"
                               title="Buka di Google Drive"
                             >
                               <ExternalLink size={14} />
@@ -714,21 +753,21 @@ export default function StudentDetail() {
                           )}
                         </div>
                       ) : (
-                        <span className="text-slate-300">-</span>
+                        <span className="text-slate-300 dark:text-slate-700">-</span>
                       )}
                     </div>
                     <div className="col-span-1 text-right flex items-center justify-end gap-1">
                       <button 
                         type="button"
                         onClick={() => openEditActivityModal(activity)}
-                        className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        className="p-2 text-slate-300 dark:text-slate-600 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-all"
                       >
                         <Edit2 size={14} />
                       </button>
                       <button 
                         type="button"
                         onClick={() => setActivityToDelete(activity)}
-                        className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                        className="p-2 text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-all"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -757,11 +796,11 @@ export default function StudentDetail() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-slate-900 w-full max-w-xl rounded-[3rem] shadow-2xl p-10 overflow-hidden border border-white/10"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-xl rounded-[3rem] shadow-2xl p-10 overflow-hidden border border-slate-200 dark:border-white/10"
             >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 rounded-full blur-3xl" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/5 dark:bg-indigo-600/10 rounded-full blur-3xl" />
               
-              <h2 className="text-2xl font-black mb-8 tracking-tight uppercase flex items-center gap-3 text-white">
+              <h2 className="text-2xl font-black mb-8 tracking-tight uppercase flex items-center gap-3 text-slate-800 dark:text-white">
                 <Plus className="text-indigo-500" />
                 Input Laporan
               </h2>
@@ -769,69 +808,69 @@ export default function StudentDetail() {
               <form onSubmit={handleAddActivity} className="space-y-5">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Tanggal</label>
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Tanggal</label>
                     <input
                       type="date"
                       required
                       value={newActivity.date}
                       onChange={e => setNewActivity({...newActivity, date: e.target.value})}
-                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-bold text-white outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all uppercase tracking-widest"
+                      className="w-full px-4 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-bold text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all uppercase tracking-widest"
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Penyusun</label>
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Penyusun</label>
                     <select
                       value={newActivity.category}
                       onChange={e => setNewActivity({...newActivity, category: e.target.value as any})}
-                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-bold text-white outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all uppercase tracking-widest appearance-none"
+                      className="w-full px-4 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-bold text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all uppercase tracking-widest appearance-none"
                     >
                       {['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map(cat => (
-                        <option key={cat} value={cat} className="bg-slate-900 text-white">{cat}</option>
+                        <option key={cat} value={cat} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">{cat}</option>
                       ))}
                     </select>
                   </div>
                 </div>
                 
                 <div>
-                  <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Laporan</label>
+                  <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Laporan</label>
                   <textarea
                     required
                     rows={3}
                     value={newActivity.classActivity}
                     onChange={e => setNewActivity({...newActivity, classActivity: e.target.value})}
-                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-none outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans"
                     placeholder="Apa laporan kegiatan hari ini?"
                   />
                 </div>
                 
                 <div>
-                  <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2">Hasil Kegiatan</label>
+                  <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Hasil Kegiatan</label>
                   <textarea
                     required
                     rows={3}
                     value={newActivity.results}
                     onChange={e => setNewActivity({...newActivity, results: e.target.value})}
-                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] font-medium text-white resize-none outline-none focus:border-indigo-500/50 focus:bg-white/10 transition-all font-sans mb-4"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-none outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans mb-4"
                     placeholder="Bagaimana hasil kegiatannya?"
                   />
                 </div>
 
                 {newActivity.category !== 'Instruktur' && (
                   <div>
-                    <label className="text-[9px] uppercase font-black text-slate-500 tracking-[0.2em] block mb-2 font-mono flex justify-between">
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2 font-mono flex justify-between">
                       Berkas Pendukung (Wajib)
                       {newActivity.attachment && <span className="text-emerald-400">Terlampir</span>}
                     </label>
                     <div className="relative group/upload">
-                      <div className={`w-full px-5 py-4 border-2 border-dashed rounded-2xl transition-all flex items-center gap-4 ${newActivity.attachment ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-white/5 border-white/10 group-hover/upload:border-indigo-500/30'}`}>
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${newActivity.attachment ? 'bg-indigo-500 text-white' : 'bg-white/10 text-slate-400'}`}>
+                      <div className={`w-full px-5 py-4 border-2 border-dashed rounded-2xl transition-all flex items-center gap-4 ${newActivity.attachment ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 group-hover/upload:border-indigo-500/30'}`}>
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${newActivity.attachment ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-white/10 text-slate-400'}`}>
                           {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
                         </div>
                         <div className="flex-1 overflow-hidden">
-                          <p className={`text-[10px] font-black uppercase tracking-widest truncate ${newActivity.attachment ? 'text-indigo-200' : 'text-slate-400'}`}>
+                          <p className={`text-[10px] font-black uppercase tracking-widest truncate ${newActivity.attachment ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-500'}`}>
                             {newActivity.attachment ? newActivity.attachment.name : 'Pilih Berkas (DOCX/PDF/EXCEL)'}
                           </p>
-                          <p className="text-[8px] font-black text-slate-500 uppercase">Max 500KB</p>
+                          <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">Max 500KB</p>
                         </div>
                       </div>
                       <input
@@ -849,7 +888,7 @@ export default function StudentDetail() {
                   <button
                     type="button"
                     onClick={() => setShowAddModal(false)}
-                    className="flex-1 py-4 border border-white/10 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-white/5 transition-all"
+                    className="flex-1 py-4 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-white/5 transition-all"
                   >
                     Batal
                   </button>
@@ -880,35 +919,35 @@ export default function StudentDetail() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-10"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-transparent dark:border-white/10"
             >
               <div className="flex items-center gap-4 mb-8">
-                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center">
+                <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center">
                   <Edit2 size={24} />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Edit Kegiatan</h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Ubah riwayat belajar ini</p>
+                  <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Edit Kegiatan</h3>
+                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Ubah riwayat belajar ini</p>
                 </div>
               </div>
 
               <form onSubmit={handleEditActivity} className="space-y-6">
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Tanggal Kegiatan</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Tanggal Kegiatan</label>
                   <input
                     type="date"
                     required
                     value={editActivityForm.date}
                     onChange={e => setEditActivityForm({...editActivityForm, date: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Penyusun Laporan</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Penyusun Laporan</label>
                   <select
                     value={editActivityForm.category}
                     onChange={e => setEditActivityForm({...editActivityForm, category: e.target.value as any})}
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
                   >
                     {['Peksos', 'Instruktur', 'Psikolog', 'Pengasuh', 'Penyuluh'].map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -916,39 +955,39 @@ export default function StudentDetail() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Laporan</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Laporan</label>
                   <textarea
                     required
                     rows={3}
                     value={editActivityForm.classActivity}
                     onChange={e => setEditActivityForm({...editActivityForm, classActivity: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-700 resize-none outline-none focus:ring-4 focus:ring-indigo-50 transition-all font-sans"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-none outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Hasil Kegiatan</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Hasil Kegiatan</label>
                   <textarea
                     required
                     rows={3}
                     value={editActivityForm.results}
                     onChange={e => setEditActivityForm({...editActivityForm, results: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-700 resize-none outline-none focus:ring-4 focus:ring-indigo-50 transition-all font-sans"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-none outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
                   />
                 </div>
 
                 {editActivityForm.category !== 'Instruktur' && (
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Update Berkas Pendukung</label>
+                    <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Update Berkas Pendukung</label>
                     <div className="relative group/editupload">
-                      <div className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-4">
-                        <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">
+                      <div className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center gap-4">
+                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
                           {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
                         </div>
                         <div className="flex-1 overflow-hidden">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-800 truncate">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-800 dark:text-slate-200 truncate">
                             {editActivityForm.attachment ? editActivityForm.attachment.name : 'Dibutuhkan berkas baru'}
                           </p>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">DOCX, PDF, Excel | Max 500KB</p>
+                          <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">DOCX, PDF, Excel | Max 500KB</p>
                         </div>
                       </div>
                       <input
@@ -964,14 +1003,14 @@ export default function StudentDetail() {
                 <div className="flex flex-col gap-3 pt-4">
                   <button
                     type="submit"
-                    className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100"
+                    className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none"
                   >
                     Simpan Perubahan
                   </button>
                   <button
                     type="button"
                     onClick={() => setActivityToEdit(null)}
-                    className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 transition-all"
+                    className="w-full py-4 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                   >
                     Batalkan
                   </button>
@@ -995,19 +1034,19 @@ export default function StudentDetail() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-8 text-center"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2rem] shadow-2xl p-8 text-center border border-transparent dark:border-white/10"
             >
-              <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Trash2 size={24} />
               </div>
-              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Hapus Catatan?</h3>
-              <p className="text-sm text-slate-500 mt-2">
+              <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Hapus Catatan?</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
                 Hapus catatan kegiatan ini?
               </p>
               <div className="grid grid-cols-2 gap-3 mt-8">
                 <button
                   onClick={() => setActivityToDelete(null)}
-                  className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-200 transition-all"
+                  className="px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                 >
                   Batal
                 </button>
@@ -1036,33 +1075,33 @@ export default function StudentDetail() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-10"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-transparent dark:border-white/10"
             >
               <div className="flex items-center gap-4 mb-8">
-                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center">
+                <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center">
                   <Edit2 size={24} />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Edit Profile</h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Ubah Data Penerima Manfaat</p>
+                  <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Edit Profile</h3>
+                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Ubah Data Penerima Manfaat</p>
                 </div>
               </div>
 
               <form onSubmit={handleEditStudent} className="space-y-5">
                 <div className="flex flex-col items-center">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Foto Profil</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Foto Profil</label>
                   <div className="relative group/photo">
-                    <div className="w-24 h-24 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden transition-all group-hover/photo:border-indigo-300 shadow-sm">
+                    <div className="w-24 h-24 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden transition-all group-hover/photo:border-indigo-300 shadow-sm">
                       {editFormData.photoUrl ? (
                         <img src={editFormData.photoUrl} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                       ) : (
-                        <div className="text-slate-300 flex flex-col items-center gap-1">
+                        <div className="text-slate-300 dark:text-slate-600 flex flex-col items-center gap-1">
                           <Plus size={24} />
                           <span className="text-[8px] font-black uppercase">Upload</span>
                         </div>
                       )}
                       {isPhotoUploading && (
-                        <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                        <div className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 flex items-center justify-center">
                           <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
                         </div>
                       )}
@@ -1077,7 +1116,7 @@ export default function StudentDetail() {
                       <button
                         type="button"
                         onClick={() => setEditFormData({...editFormData, photoUrl: ''})}
-                        className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-rose-600 transition-all scale-0 group-hover/photo:scale-100"
+                        className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg dark:shadow-none hover:bg-rose-600 transition-all scale-0 group-hover/photo:scale-100"
                       >
                         <Trash2 size={12} />
                       </button>
@@ -1086,47 +1125,47 @@ export default function StudentDetail() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Nama Lengkap</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Nama Lengkap</label>
                   <input
                     type="text"
                     required
                     value={editFormData.name}
                     onChange={e => setEditFormData({...editFormData, name: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Vokasional</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Vokasional</label>
                   <input
                     type="text"
                     value={editFormData.vocation}
                     onChange={e => setEditFormData({...editFormData, vocation: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
                     placeholder="Contoh: Menjahit, Tata Boga"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Tanggal Masuk</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Tanggal Masuk</label>
                   <input
                     type="date"
                     required
                     value={editFormData.enrollmentDate}
                     onChange={e => setEditFormData({...editFormData, enrollmentDate: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-50 outline-none text-xs font-bold uppercase tracking-widest"
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
                   />
                 </div>
                 
                 <div className="flex flex-col gap-3 pt-4">
                   <button
                     type="submit"
-                    className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100"
+                    className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none"
                   >
                     Simpan Perubahan
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowEditModal(false)}
-                    className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 transition-all"
+                    className="w-full py-4 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                   >
                     Batalkan
                   </button>
@@ -1150,28 +1189,153 @@ export default function StudentDetail() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-8 text-center"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2rem] shadow-2xl p-8 text-center border border-transparent dark:border-white/10"
             >
-              <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-3">
+              <div className="w-20 h-20 bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-3">
                 <AlertCircle size={40} />
               </div>
-              <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Hapus Penerima Manfaat?</h3>
-              <p className="text-sm text-slate-500 mt-3">
+              <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Hapus Penerima Manfaat?</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-3">
                 Anda akan menghapus data <strong>{localStudent.name}</strong> secara permanen. Seluruh riwayat belajar akan terhapus.
               </p>
               <div className="flex flex-col gap-3 mt-8">
                 <button
                   onClick={confirmDeleteStudent}
-                  className="w-full py-4 bg-rose-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-rose-700 transition-all shadow-xl shadow-rose-100"
+                  className="w-full py-4 bg-rose-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-rose-700 transition-all shadow-xl shadow-rose-100 dark:shadow-none"
                 >
                   Konfirmasi Hapus Data
                 </button>
                 <button
                   onClick={() => setShowDeleteStudentModal(false)}
-                  className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 transition-all font-mono"
+                  className="w-full py-4 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-200 dark:hover:bg-slate-700 transition-all font-mono"
                 >
                   Batalkan Tindakan
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+        {/* Preview Attachment Modal */}
+        {previewAttachment && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setPreviewAttachment(null)}
+              className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-5xl h-[90vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden border border-transparent dark:border-white/10"
+            >
+              {/* Modal Header */}
+              <div className="px-8 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900 z-10">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
+                    <FileText size={20} />
+                  </div>
+                  <div className="overflow-hidden">
+                    <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-tight truncate max-w-[200px] md:max-w-md">
+                      {previewAttachment.name}
+                    </h3>
+                    <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Preview Berkas</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {previewUrl && (
+                    <button
+                      onClick={() => window.open(previewUrl, '_blank')}
+                      className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
+                    >
+                      <ExternalLink size={14} />
+                      Buka di Tab Baru
+                    </button>
+                  )}
+                  <button
+                    onClick={() => downloadAttachment(previewAttachment)}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all"
+                  >
+                    <Download size={14} />
+                    Unduh
+                  </button>
+                  <button
+                    onClick={() => setPreviewAttachment(null)}
+                    className="p-2 text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Content */}
+              <div className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-950 p-4 md:p-8 flex items-center justify-center">
+                {previewAttachment.type.startsWith('image/') ? (
+                  previewAttachment.base64 ? (
+                    <img 
+                      src={previewAttachment.base64} 
+                      alt={previewAttachment.name} 
+                      className="max-w-full max-h-full object-contain rounded-xl shadow-lg shadow-slate-200 dark:shadow-none"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : null
+                ) : previewAttachment.type === 'application/pdf' ? (
+                  previewUrl ? (
+                    <div className="w-full h-full flex flex-col gap-4">
+                      <div className="flex-1 relative">
+                        <iframe 
+                          src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0`} 
+                          title={previewAttachment.name}
+                          className="w-full h-full rounded-xl border-none shadow-sm shadow-slate-200 dark:shadow-none bg-white"
+                        />
+                        {/* Overlay message for blocked frames */}
+                        <div className="absolute inset-0 pointer-events-none flex items-center justify-center bg-white/0 group">
+                           {/* Invisible overlay that might show a message if needed */}
+                        </div>
+                      </div>
+                      <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-100 dark:border-amber-500/20 p-4 rounded-2xl flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-lg flex items-center justify-center shrink-0">
+                            <AlertCircle size={18} />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black text-amber-800 dark:text-white uppercase tracking-tight">Muncul pesan "Blocked by Google"?</p>
+                            <p className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">Klik tombol "Buka di Tab Baru" di pojok kanan atas untuk melihat dokumen dengan aman.</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => window.open(previewUrl, '_blank')}
+                          className="px-4 py-2 bg-amber-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-700 transition-all"
+                        >
+                          Buka Sekarang
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4">
+                      <Loader2 className="animate-spin text-indigo-500" size={32} />
+                      <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Menyiapkan Preview...</p>
+                    </div>
+                  )
+                ) : (
+                  <div className="text-center p-12 bg-white dark:bg-slate-900 rounded-[2rem] shadow-sm border border-slate-100 dark:border-white/5 max-w-sm">
+                    <div className="w-20 h-20 bg-amber-50 dark:bg-amber-500/10 text-amber-500 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                      <AlertCircle size={40} />
+                    </div>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight mb-2">Preview Tidak Tersedia</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-8">
+                      Mohon maaf, format berkas ini (<strong>{previewAttachment.name.split('.').pop()?.toUpperCase()}</strong>) tidak dapat ditampilkan langsung di browser. Silakan unduh berkas untuk melihat isinya.
+                    </p>
+                    <button
+                      onClick={() => downloadAttachment(previewAttachment)}
+                      className="w-full py-4 bg-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all"
+                    >
+                      Klik Untuk Unduh
+                    </button>
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>
