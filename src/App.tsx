@@ -37,7 +37,6 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
       if (currentUser) {
         // Sync user document to ensure they appear in the system user list
         try {
@@ -48,7 +47,8 @@ export default function App() {
             email: currentUser.email,
             displayName: currentUser.displayName || (currentUser.email === 'akundatakantor@gmail.com' ? 'Super Admin' : 'User'),
             lastActive: serverTimestamp(),
-            updatedAt: serverTimestamp()
+            updatedAt: serverTimestamp(),
+            forceLogout: false // Explicitly reset on login
           };
 
           if (!userDoc.exists()) {
@@ -56,8 +56,7 @@ export default function App() {
             await setDoc(userDocRef, {
               ...userData,
               role: role,
-              createdAt: serverTimestamp(),
-              forceLogout: false
+              createdAt: serverTimestamp()
             });
             setIsAdmin(role === 'admin');
           } else {
@@ -78,6 +77,8 @@ export default function App() {
       } else {
         setIsAdmin(false);
       }
+      
+      setUser(currentUser); // Move to AFTER sync completes
       setLoading(false);
     });
     return () => unsubscribe();
