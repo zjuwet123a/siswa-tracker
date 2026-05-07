@@ -59,6 +59,16 @@
         "name": { "type": "string" }
       },
       "required": ["name"]
+    },
+    "Vocation": {
+      "title": "Vocation",
+      "description": "Vocational program with instructors.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "instructors": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name"]
     }
   },
   "firestore": {
@@ -81,6 +91,10 @@
     "/categories/{categoryId}": {
       "schema": "Category",
       "description": "Available activity categories."
+    },
+    "/vocations/{vocationId}": {
+      "schema": "Vocation",
+      "description": "Available vocational programs."
     }
   }
 }

@@ -57,13 +57,45 @@ async function startServer() {
         body: stream
       };
 
-      const response = await drive.files.create({
-        requestBody: fileMetadata,
-        media: media,
-        fields: 'id, webViewLink'
-      });
+      let response;
+      try {
+        response = await drive.files.create({
+          requestBody: fileMetadata,
+          media: media,
+          fields: 'id, webViewLink'
+        });
+      } catch (createError: any) {
+        const isFolderNotFound = createError.code === 404 || createError.response?.status === 404;
+        if (isFolderNotFound && folderId) {
+          console.warn(`Folder ${folderId} not found or inaccessible. Falling back to root.`);
+          // Remove parents to upload to root
+          const rootMetadata = { ...fileMetadata };
+          delete rootMetadata.parents;
+          
+          // We need to recreate the stream because it might have been consumed or closed
+          const fallbackStream = new Readable();
+          fallbackStream.push(buffer);
+          fallbackStream.push(null);
+          
+          response = await drive.files.create({
+            requestBody: rootMetadata,
+            media: {
+              mimeType: fileType,
+              body: fallbackStream
+            },
+            fields: 'id, webViewLink'
+          });
+        } else {
+          throw createError;
+        }
+      }
 
-      res.json({ success: true, fileId: response.data.id, link: response.data.webViewLink });
+      res.json({ 
+        success: true, 
+        fileId: response.data.id, 
+        link: response.data.webViewLink,
+        warning: folderId && !fileMetadata.parents ? "Folder tidak ditemukan, file diunggah ke Root" : undefined
+      });
     } catch (error: any) {
       const errorData = error.response?.data || error;
       console.error("Backup error detail:", JSON.stringify(errorData, null, 2));

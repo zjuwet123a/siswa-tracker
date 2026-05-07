@@ -29,19 +29,14 @@ function StatCard({ title, value, icon, color, delay, textColor = "text-slate-80
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({
-    totalStudents: 0,
-    totalActivities: 0,
-  });
-  const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
-  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [studentsMap, setStudentsMap] = useState<Record<string, Student>>({});
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [allActivities, setAllActivities] = useState<Activity[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Listen to students for stats and lookup
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
-      setStats(prev => ({ ...prev, totalStudents: snap.size }));
       const map: Record<string, Student> = {};
       snap.docs.forEach(doc => {
         map[doc.id] = { id: doc.id, ...doc.data() } as Student;
@@ -52,29 +47,13 @@ export default function Dashboard() {
       setError('Gagal memuat data siswa. Pastikan koneksi stabil.');
     });
 
-    // Listen to total activities count
-    const unsubTotalActivities = onSnapshot(collectionGroup(db, 'activities'), (snap) => {
-      setStats(prev => ({ ...prev, totalActivities: snap.size }));
-    }, (error) => {
-      console.error('Dashboard total activities sync failed:', error);
-      // Seringkali gagal karena index collectionGroup belum ada
-      setError('Index database sedang disiapkan atau bermasalah.');
-    });
-
-    // Listen to recent activities across all students
-    const qActivities = query(
-      collectionGroup(db, 'activities'),
-      orderBy('date', 'desc'),
-      orderBy('createdAt', 'desc'),
-      limit(10)
-    );
-
-    const unsubActivities = onSnapshot(qActivities, (snap) => {
+    // Listen to ALL activities across all students using collectionGroup
+    const unsubActivities = onSnapshot(collectionGroup(db, 'activities'), (snap) => {
       const activities = snap.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Activity[];
-      setRecentActivities(activities);
+      setAllActivities(activities);
       setError(null);
     }, (error) => {
       console.error('Dashboard activities sync failed:', error);
@@ -83,10 +62,27 @@ export default function Dashboard() {
 
     return () => {
       unsubStudents();
-      unsubTotalActivities();
       unsubActivities();
     };
   }, []);
+
+  // Derived stats and filtered items
+  const validActivities = allActivities.filter(a => !!studentsMap[a.studentId]);
+  
+  const totalStudentsValue = Object.keys(studentsMap).length;
+  const totalActivitiesValue = validActivities.length;
+  
+  const recentActivitiesList = [...validActivities]
+    .sort((a, b) => {
+      const dateA = a.date?.toDate?.()?.getTime() || 0;
+      const dateB = b.date?.toDate?.()?.getTime() || 0;
+      if (dateB !== dateA) return dateB - dateA;
+      
+      const createdA = a.createdAt?.toDate?.()?.getTime() || 0;
+      const createdB = b.createdAt?.toDate?.()?.getTime() || 0;
+      return createdB - createdA;
+    })
+    .slice(0, 10);
 
   return (
     <div className="space-y-8">
@@ -115,7 +111,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <StatCard 
           title="TOTAL PENERIMA MANFAAT" 
-          value={stats.totalStudents} 
+          value={totalStudentsValue} 
           icon={<Users className="text-white" size={24} />} 
           color="bg-indigo-600"
           textColor="text-white"
@@ -123,7 +119,7 @@ export default function Dashboard() {
         />
         <StatCard 
           title="JUMLAH KEGIATAN PENERIMA MANFAAT VOKASIONAL" 
-          value={stats.totalActivities} 
+          value={totalActivitiesValue} 
           icon={<Clock className="text-white" size={24} />} 
           color="bg-emerald-500"
           textColor="text-white"
@@ -154,7 +150,7 @@ export default function Dashboard() {
 
             <div className="space-y-3 max-h-[460px] overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar">
               <AnimatePresence mode="popLayout">
-                {recentActivities.map((activity, idx) => (
+                {recentActivitiesList.map((activity, idx) => (
                     <motion.div
                       key={activity.id}
                       initial={{ opacity: 0, x: -20 }}
@@ -212,7 +208,7 @@ export default function Dashboard() {
                 ))}
               </AnimatePresence>
 
-              {recentActivities.length === 0 && (
+              {recentActivitiesList.length === 0 && (
                 <div className="py-20 text-center">
                   <div className="inline-flex p-6 rounded-full bg-slate-50 dark:bg-slate-800 text-slate-300 dark:text-slate-700 mb-4 border border-dashed border-slate-200 dark:border-slate-700">
                     <Clock size={32} />

@@ -16,6 +16,13 @@ export interface Cluster {
 export interface Category {
   id: string;
   name: string;
+  requiresAttachment?: boolean;
+}
+
+export interface Vocation {
+  id: string;
+  name: string;
+  instructors: string[];
 }
 
 export interface Student {

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Student, Cluster } from '../types';
-import { UserPlus, Search, ChevronRight, GraduationCap, Trash2, User } from 'lucide-react';
+import { Student, Cluster, Vocation } from '../types';
+import { UserPlus, Search, ChevronRight, GraduationCap, Trash2, User, Briefcase } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import ImageCropper from './ImageCropper';
@@ -12,6 +12,7 @@ export default function StudentList() {
   const navigate = useNavigate();
   const [students, setStudents] = useState<Student[]>([]);
   const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [vocations, setVocations] = useState<Vocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', vocation: '', clusters: [] as string[], enrollmentDate: new Date().toISOString().split('T')[0], photoUrl: '' });
@@ -22,7 +23,15 @@ export default function StudentList() {
     const unsubClusters = onSnapshot(collection(db, 'clusters'), (snapshot) => {
       setClusters(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Cluster)));
     });
-    return () => unsubClusters();
+
+    const unsubVocations = onSnapshot(collection(db, 'vocations'), (snapshot) => {
+      setVocations(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Vocation)));
+    });
+
+    return () => {
+      unsubClusters();
+      unsubVocations();
+    };
   }, []);
 
   const CLUSTER_OPTIONS = clusters.map(c => c.name);
@@ -111,10 +120,30 @@ export default function StudentList() {
 
     try {
       setLoading(true);
-      await deleteDoc(doc(db, 'students', studentToDelete.id));
+      const { writeBatch, getDocs, collection, query, where } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      
+      // Delete student
+      batch.delete(doc(db, 'students', studentToDelete.id));
+      
+      // Delete related activities
+      const activitiesSnapshot = await getDocs(collection(db, `students/${studentToDelete.id}/activities`));
+      activitiesSnapshot.docs.forEach((activityDoc) => {
+        batch.delete(activityDoc.ref);
+      });
+
+      // Fallback: Delete related activities in root collection (legacy data)
+      const rootActivitiesSnapshot = await getDocs(query(collection(db, 'activities'), where('studentId', '==', studentToDelete.id)));
+      rootActivitiesSnapshot.docs.forEach((activityDoc) => {
+        batch.delete(activityDoc.ref);
+      });
+      
+      await batch.commit();
       setStudentToDelete(null);
+      alert('Penerima manfaat dan laporan terkait berhasil dihapus.');
     } catch (error) {
       console.error('Delete student failed:', error);
+      alert('Gagal menghapus data. Silakan coba lagi.');
       handleFirestoreError(error, OperationType.DELETE, `student ${studentToDelete.id}`);
     } finally {
       setLoading(false);
@@ -419,20 +448,17 @@ export default function StudentList() {
                   />
                 </div>
                 <div>
-                  <label className="label-bento dark:text-slate-400">KETERANGAN VOKASIONAL</label>
-                  <input
-                    type="text"
-                    list="vocation-list"
+                  <label className="label-bento dark:text-slate-400">PILIH VOKASIONAL</label>
+                  <select
                     value={newStudent.vocation}
                     onChange={e => setNewStudent({...newStudent, vocation: e.target.value})}
                     className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-900/20 outline-none text-xs font-bold uppercase tracking-widest dark:text-white"
-                    placeholder="Contoh: Menjahit, Tata Boga, dll"
-                  />
-                  <datalist id="vocation-list">
-                    {uniqueVocations.map(v => (
-                      <option key={v} value={v} />
+                  >
+                    <option value="">Pilih Vokasional...</option>
+                    {vocations.map(v => (
+                      <option key={v.id} value={v.name}>{v.name}</option>
                     ))}
-                  </datalist>
+                  </select>
                 </div>
                 <div>
                   <MultiSelect

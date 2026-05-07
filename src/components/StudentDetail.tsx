@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
-import { Student, Activity, Category, Cluster } from '../types';
-import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2, Eye, X, Shield } from 'lucide-react';
+import { Student, Activity, Category, Cluster, Vocation } from '../types';
+import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2, Eye, X, Shield, Briefcase } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, AlignmentType, WidthType, BorderStyle, VerticalAlign } from 'docx';
+import { saveAs } from 'file-saver';
 import { useParams, useNavigate } from 'react-router-dom';
 import { uploadToGoogleDrive, GOOGLE_DRIVE_SCOPES, backupToSystemDrive } from '../lib/googleDrive';
 import ImageCropper from './ImageCropper';
@@ -24,6 +26,7 @@ export default function StudentDetail() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [vocations, setVocations] = useState<Vocation[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('Semua');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +81,10 @@ export default function StudentDetail() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [isDriveConnecting, setIsDriveConnecting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportCategories, setExportCategories] = useState<string[]>([]);
+  const [exportMonth, setExportMonth] = useState<number>(new Date().getMonth());
+  const [exportYear, setExportYear] = useState<number>(new Date().getFullYear());
 
   const handleConnectDrive = () => {
     const clientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
@@ -168,13 +175,19 @@ export default function StudentDetail() {
     const unsubClusters = onSnapshot(collection(db, 'clusters'), (snapshot) => {
       setClusters(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Cluster)));
     });
+    const unsubVocations = onSnapshot(collection(db, 'vocations'), (snapshot) => {
+      setVocations(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Vocation)));
+    });
     return () => {
       unsubCategories();
       unsubClusters();
+      unsubVocations();
     };
   }, []);
 
   const CATEGORY_OPTIONS = categories.map(c => c.name);
+  const ALL_ACTIVITY_CATEGORIES = Array.from(new Set(activities.map(a => a.category)));
+  const EXPORT_CATEGORY_OPTIONS = Array.from(new Set([...CATEGORY_OPTIONS, ...ALL_ACTIVITY_CATEGORIES])).filter(Boolean);
   const CLUSTER_OPTIONS = clusters.map(c => c.name);
 
   // Initial state for edit form should be handled after student load
@@ -191,8 +204,9 @@ export default function StudentDetail() {
     e.preventDefault();
     if (!studentId || !newActivity.classActivity || !newActivity.results) return;
 
-    if (newActivity.category !== 'Instruktur' && !newActivity.attachment) {
-      alert('Mohon lampirkan berkas pendukung (DOCX, PDF, atau Excel).');
+    const selectedCategoryObj = categories.find(c => c.name === newActivity.category);
+    if (selectedCategoryObj?.requiresAttachment && !newActivity.attachment) {
+      alert(`Penyusun '${newActivity.category}' wajib melampirkan berkas pendukung (DOCX, PDF, atau Excel).`);
       return;
     }
 
@@ -334,8 +348,9 @@ export default function StudentDetail() {
     e.preventDefault();
     if (!localStudent || !activityToEdit || !editActivityForm.classActivity || !editActivityForm.results) return;
 
-    if (editActivityForm.category !== 'Instruktur' && !editActivityForm.attachment) {
-      alert('Mohon lampirkan berkas pendukung.');
+    const selectedCategoryObj = categories.find(c => c.name === editActivityForm.category);
+    if (selectedCategoryObj?.requiresAttachment && !editActivityForm.attachment) {
+      alert(`Penyusun '${editActivityForm.category}' wajib melampirkan berkas pendukung.`);
       return;
     }
 
@@ -429,10 +444,31 @@ export default function StudentDetail() {
   const confirmDeleteStudent = async () => {
     if (!localStudent) return;
     try {
-      await deleteDoc(doc(db, 'students', localStudent.id));
+      const { writeBatch, getDocs, collection, query, where } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      
+      // Delete student
+      batch.delete(doc(db, 'students', localStudent.id));
+      
+      // Delete related activities
+      const activitiesSnapshot = await getDocs(collection(db, `students/${localStudent.id}/activities`));
+      activitiesSnapshot.docs.forEach((activityDoc) => {
+        batch.delete(activityDoc.ref);
+      });
+
+      // Fallback: Delete related activities in root collection (legacy data)
+      const rootActivitiesSnapshot = await getDocs(query(collection(db, 'activities'), where('studentId', '==', localStudent.id)));
+      rootActivitiesSnapshot.docs.forEach((activityDoc) => {
+        batch.delete(activityDoc.ref);
+      });
+      
+      await batch.commit();
       setShowDeleteStudentModal(false);
+      alert('Penerima manfaat dan laporan terkait berhasil dihapus.');
       navigate('/penerima-manfaat');
     } catch (error) {
+      console.error('Delete student failed:', error);
+      alert('Gagal menghapus data. Silakan coba lagi.');
       handleFirestoreError(error, OperationType.DELETE, `student ${localStudent.id}`);
     }
   };
@@ -440,90 +476,265 @@ export default function StudentDetail() {
   const handleExportPDF = () => {
     if (!localStudent) return;
     const doc = new jsPDF();
-    
-    // Header
-    doc.setFontSize(20);
-    doc.setTextColor(30, 41, 59); // slate-800
-    doc.text('LAPORAN KEGIATAN', 14, 22);
-    doc.setFontSize(14);
-    doc.text('PENERIMA MANFAAT', 14, 30);
-    
-    // Line separator
-    doc.setDrawColor(226, 232, 240); // slate-200
-    doc.line(14, 35, 196, 35);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const monthNames = [
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
 
-    // Profile Info
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139); // slate-500
-    doc.text('NAMA LENGKAP:', 14, 45);
-    doc.text('VOKASIONAL:', 14, 52);
-    doc.text('TANGGAL MASUK:', 14, 59);
-    doc.text('TOTAL SESI:', 14, 66);
-    
-    doc.setTextColor(30, 41, 59); // slate-800
-    doc.setFont('helvetica', 'bold');
-    doc.text(localStudent.name.toUpperCase(), 50, 45);
-    doc.text((localStudent.vocation || '-').toUpperCase(), 50, 52);
-    doc.text(localStudent.enrollmentDate?.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase() || '-', 50, 59);
-    doc.text(activities.filter(a => a.category === 'Instruktur').length.toString(), 50, 66);
-    
-    // Table
-    const filteredForPDF = activeCategory === 'Semua' 
-      ? activities 
-      : activities.filter(a => a.category === activeCategory);
+    let pagesAdded = 0;
 
-    const tableData = filteredForPDF.map(activity => [
-      activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }),
-      activity.category?.toUpperCase() || '-',
-      activity.classActivity,
-      activity.results
-    ]);
+    exportCategories.forEach((category) => {
+      // Filter activities for this specific category and time period
+      const filteredForPDF = activities.filter(a => {
+        const date = a.date?.toDate();
+        if (!date) return false;
+        const matchMonth = date.getMonth() === exportMonth;
+        const matchYear = date.getFullYear() === exportYear;
+        const matchCategory = a.category === category;
+        return matchMonth && matchYear && matchCategory;
+      });
 
-    autoTable(doc, {
-      startY: 75,
-      head: [['TANGGAL', 'KATEGORI', 'KEGIATAN KELAS', 'HASIL KEGIATAN']],
-      body: tableData,
-      theme: 'grid',
-      headStyles: { 
-        fillColor: [79, 70, 229], // indigo-600
-        textColor: [255, 255, 255], 
-        fontStyle: 'bold',
-        fontSize: 9,
-        halign: 'center'
-      },
-      styles: { 
-        fontSize: 8, 
-        cellPadding: 5,
-        valign: 'middle'
-      },
-      columnStyles: {
-        0: { cellWidth: 30, halign: 'center' },
-        1: { cellWidth: 25, halign: 'center' },
-        2: { cellWidth: 'auto' },
-        3: { cellWidth: 'auto' }
-      },
-      margin: { top: 75 }
+      // If no data for this category, skip it to avoid empty pages
+      if (filteredForPDF.length === 0) return;
+
+      // Add a new page if this is not the first category with data
+      if (pagesAdded > 0) {
+        doc.addPage();
+      }
+      pagesAdded++;
+
+      // Header - Centered as per screenshot
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      const title1 = 'MATERI TERAPI VOKASIONAL PENERIMA MANFAAT';
+      const title2 = `SENTRA "MAHATMIYA" DI BALI TAHUN ${exportYear}`;
+      
+      doc.text(title1, (pageWidth - doc.getTextWidth(title1)) / 2, 20);
+      doc.text(title2, (pageWidth - doc.getTextWidth(title2)) / 2, 27);
+
+      // Metadata Section
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      const startMetaY = 45;
+      const lineSpacing = 8;
+      const columnOffset = 40;
+
+      doc.text('Bulan', 14, startMetaY);
+      doc.text(':', columnOffset, startMetaY);
+      doc.text(monthNames[exportMonth], columnOffset + 3, startMetaY);
+      
+      doc.text('Kegiatan', 14, startMetaY + lineSpacing);
+      doc.text(':', columnOffset, startMetaY + lineSpacing);
+      // Show the student's vocation (class activity) instead of category name
+      doc.text(localStudent.vocation || category, columnOffset + 3, startMetaY + lineSpacing);
+      
+      doc.text('Instruktur', 14, startMetaY + (lineSpacing * 2));
+      doc.text(':', columnOffset, startMetaY + (lineSpacing * 2));
+      
+      // Get instructors from vocation
+      const studentVocation = vocations.find(v => v.name === localStudent.vocation);
+      const vocationInstructors = studentVocation?.instructors || [];
+      
+      let instructorsLineCount = 0;
+      if (vocationInstructors.length > 0) {
+        vocationInstructors.forEach((instructor, idx) => {
+          doc.text(instructor, columnOffset + 3, startMetaY + (lineSpacing * (2 + idx)));
+          instructorsLineCount = idx + 1;
+        });
+      }
+      
+      // If no vocation instructors found, fallback to creator name of the first activity in this category
+      if (vocationInstructors.length === 0) {
+        const firstActivity = filteredForPDF[0];
+        if (firstActivity?.createdByName) {
+          doc.text(firstActivity.createdByName, columnOffset + 3, startMetaY + (lineSpacing * 2));
+          instructorsLineCount = 1;
+        }
+      }
+
+      const tableData = filteredForPDF.map((activity, index) => [
+        (index + 1).toString(),
+        activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        activity.classActivity,
+        activity.results
+      ]);
+
+      autoTable(doc, {
+        startY: startMetaY + (lineSpacing * Math.max(2 + instructorsLineCount, 3)) + 5,
+        head: [['NO', 'TANGGAL', 'MATERI', 'HASIL YANG DICAPAI']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { 
+          fillColor: [255, 255, 255], 
+          textColor: [0, 0, 0], 
+          fontStyle: 'bold',
+          fontSize: 10,
+          halign: 'center',
+          lineWidth: 0.1,
+          lineColor: [0, 0, 0]
+        },
+        styles: { 
+          fontSize: 9, 
+          cellPadding: 4,
+          valign: 'middle',
+          textColor: [0, 0, 0],
+          lineWidth: 0.1,
+          lineColor: [0, 0, 0]
+        },
+        columnStyles: {
+          0: { cellWidth: 20, halign: 'center' },
+          1: { cellWidth: 35, halign: 'center' },
+          2: { cellWidth: 'auto' },
+          3: { cellWidth: 'auto' }
+        },
+        margin: { left: 14, right: 14 }
+      });
     });
 
-    // Footer
-    const pageCount = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184); // slate-400
-      doc.text(
-        `Dicetak pada: ${new Date().toLocaleString('id-ID')}`,
-        14,
-        doc.internal.pageSize.height - 10
-      );
-      doc.text(
-        `Halaman ${i} dari ${pageCount}`,
-        doc.internal.pageSize.width - 40,
-        doc.internal.pageSize.height - 10
-      );
+    if (pagesAdded === 0) {
+      alert('Tidak ada data laporan untuk kombinasi bulan, tahun, dan kategori yang dipilih.');
+      return;
     }
 
-    doc.save(`Laporan_${localStudent.name.replace(/\s+/g, '_')}.pdf`);
+    doc.save(`Form_Materi_${localStudent.name.replace(/\s+/g, '_')}_${monthNames[exportMonth]}.pdf`);
+  };
+
+  const handleExportWord = async () => {
+    if (!localStudent) return;
+    
+    const monthNames = [
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+
+    const sections = [];
+
+    for (const category of exportCategories) {
+      const filteredActivities = activities.filter(a => {
+        const date = a.date?.toDate();
+        if (!date) return false;
+        return date.getMonth() === exportMonth && 
+               date.getFullYear() === exportYear && 
+               a.category === category;
+      });
+
+      if (filteredActivities.length === 0) continue;
+
+      // Group activities by category for the Word doc
+      const studentVocation = vocations.find(v => v.name === localStudent.vocation);
+      const vocationInstructors = studentVocation?.instructors || [];
+      const instructors = vocationInstructors.length > 0 
+        ? vocationInstructors 
+        : [filteredActivities[0]?.createdByName || '-'];
+
+      const tableRows = [
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: "NO", alignment: AlignmentType.CENTER, children: [new TextRun({ bold: true, size: 20 })] })], verticalAlign: VerticalAlign.CENTER }),
+            new TableCell({ children: [new Paragraph({ text: "TANGGAL", alignment: AlignmentType.CENTER, children: [new TextRun({ bold: true, size: 20 })] })], verticalAlign: VerticalAlign.CENTER }),
+            new TableCell({ children: [new Paragraph({ text: "MATERI", alignment: AlignmentType.CENTER, children: [new TextRun({ bold: true, size: 20 })] })], verticalAlign: VerticalAlign.CENTER }),
+            new TableCell({ children: [new Paragraph({ text: "HASIL YANG DICAPAI", alignment: AlignmentType.CENTER, children: [new TextRun({ bold: true, size: 20 })] })], verticalAlign: VerticalAlign.CENTER }),
+          ],
+        }),
+      ];
+
+      filteredActivities.forEach((activity, index) => {
+        tableRows.push(
+          new TableRow({
+            children: [
+              new TableCell({ children: [new Paragraph({ text: (index + 1).toString(), alignment: AlignmentType.CENTER, children: [new TextRun({ size: 18 })] })], verticalAlign: VerticalAlign.CENTER }),
+              new TableCell({ children: [new Paragraph({ text: activity.date?.toDate().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }), alignment: AlignmentType.CENTER, children: [new TextRun({ size: 18 })] })], verticalAlign: VerticalAlign.CENTER }),
+              new TableCell({ children: [new Paragraph({ text: activity.classActivity, children: [new TextRun({ size: 18 })] })], verticalAlign: VerticalAlign.CENTER }),
+              new TableCell({ children: [new Paragraph({ text: activity.results, children: [new TextRun({ size: 18 })] })], verticalAlign: VerticalAlign.CENTER }),
+            ],
+          })
+        );
+      });
+
+      sections.push({
+        properties: {},
+        children: [
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [
+              new TextRun({
+                text: "MATERI TERAPI VOKASIONAL PENERIMA MANFAAT",
+                bold: true,
+                size: 24,
+              }),
+            ],
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [
+              new TextRun({
+                text: `SENTRA "MAHATMIYA" DI BALI TAHUN ${exportYear}`,
+                bold: true,
+                size: 24,
+              }),
+            ],
+            spacing: { after: 400 },
+          }),
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: {
+              top: { style: BorderStyle.NONE, size: 0 },
+              bottom: { style: BorderStyle.NONE, size: 0 },
+              left: { style: BorderStyle.NONE, size: 0 },
+              right: { style: BorderStyle.NONE, size: 0 },
+              insideHorizontal: { style: BorderStyle.NONE, size: 0 },
+              insideVertical: { style: BorderStyle.NONE, size: 0 },
+            },
+            rows: [
+              new TableRow({
+                children: [
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Bulan", size: 21 })] })], width: { size: 20, type: WidthType.PERCENTAGE } }),
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ": " + monthNames[exportMonth], size: 21 })] })] }),
+                ],
+              }),
+              new TableRow({
+                children: [
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Kegiatan", size: 21 })] })] }),
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ": " + (localStudent.vocation || category), size: 21 })] })] }),
+                ],
+              }),
+              new TableRow({
+                children: [
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Instruktur", size: 21 })] })] }),
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ": " + instructors.join(", "), size: 21 })] })] }),
+                ],
+              }),
+            ],
+          }),
+          new Paragraph({ text: "", spacing: { before: 200 } }),
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: tableRows,
+          }),
+          new Paragraph({ text: "", spacing: { before: 400 }, pageBreakBefore: true }),
+        ],
+      });
+    }
+
+    if (sections.length === 0) {
+      alert('Tidak ada data laporan untuk kombinasi bulan, tahun, dan kategori yang dipilih.');
+      return;
+    }
+
+    // Remove the last page break logic by filtering or handling properly if needed
+    // In docx, pageBreakBefore applies to the element. 
+    // Let's refine sections to only have one sections object with multiple paragraphs if we want everything in one file but split by pages.
+    
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: sections.flatMap(s => s.children)
+      }],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `Form_Materi_${localStudent.name.replace(/\s+/g, '_')}_${monthNames[exportMonth]}.docx`);
   };
 
   if (loading) {
@@ -671,7 +882,23 @@ export default function StudentDetail() {
 
               {activities.length > 0 && (
                 <button 
-                  onClick={handleExportPDF}
+                  onClick={() => {
+                    const uniqueActivityCategories = Array.from(new Set(activities.map(a => a.category)));
+                    const defaultExportCategories = Array.from(new Set([...uniqueActivityCategories, ...CATEGORY_OPTIONS])).filter(Boolean);
+                    
+                    setExportCategories(defaultExportCategories);
+                    
+                    if (activities.length > 0) {
+                      // activities is sorted by date asc (line 145)
+                      const latest = activities[activities.length - 1];
+                      const latestDate = latest.date?.toDate();
+                      if (latestDate) {
+                        setExportMonth(latestDate.getMonth());
+                        setExportYear(latestDate.getFullYear());
+                      }
+                    }
+                    setShowExportModal(true);
+                  }}
                   className="flex items-center gap-2 text-[9px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest bg-indigo-50 dark:bg-indigo-900/30 px-4 py-2 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shrink-0"
                 >
                   <Download size={14} />
@@ -828,6 +1055,152 @@ export default function StudentDetail() {
       </div>
       {/* Modals Section */}
       <AnimatePresence>
+        {showExportModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowExportModal(false)}
+              className="absolute inset-0 bg-slate-900/80 backdrop-blur-md" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[3rem] shadow-2xl p-10 overflow-hidden border border-slate-200 dark:border-white/10"
+            >
+              <h2 className="text-2xl font-black mb-2 tracking-tight uppercase flex items-center gap-3 text-slate-800 dark:text-white">
+                <Download className="text-indigo-500" />
+                Export Laporan
+              </h2>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-8">Pilih bulan dan kategori laporan yang ingin diexport</p>
+              
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Bulan</label>
+                    <select
+                      value={exportMonth}
+                      onChange={e => setExportMonth(parseInt(e.target.value))}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/20 uppercase tracking-widest appearance-none"
+                    >
+                      {[
+                        'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+                        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+                      ].map((m, i) => (
+                        <option key={i} value={i} className="bg-white dark:bg-slate-900">{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Tahun</label>
+                    <select
+                      value={exportYear}
+                      onChange={e => setExportYear(parseInt(e.target.value))}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/20 uppercase tracking-widest appearance-none"
+                    >
+                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                        <option key={y} value={y} className="bg-white dark:bg-slate-900">{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <MultiSelect
+                    label="Pilih Kategori Laporan"
+                    options={EXPORT_CATEGORY_OPTIONS}
+                    selected={exportCategories}
+                    onChange={(selected) => setExportCategories(selected)}
+                    placeholder="Semua Kategori..."
+                  />
+                  <div className="flex gap-2 mt-4">
+                    <button 
+                      onClick={() => setExportCategories(EXPORT_CATEGORY_OPTIONS)}
+                      className="text-[9px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      Pilih Semua
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button 
+                      onClick={() => setExportCategories([])}
+                      className="text-[9px] font-black uppercase tracking-widest text-slate-400 hover:underline"
+                    >
+                      Hapus Pilihan
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Ringkasan</h4>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Total Kategori Terpilih:</span>
+                    <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">{exportCategories.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Laporan di Bulan Ini:</span>
+                    <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">
+                      {activities.filter(a => {
+                        const date = a.date?.toDate();
+                        return date && 
+                          date.getMonth() === exportMonth && 
+                          date.getFullYear() === exportYear && 
+                          exportCategories.includes(a.category);
+                      }).length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowExportModal(false)}
+                    className="flex-1 py-4 border border-slate-200 dark:border-white/10 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all font-mono"
+                  >
+                    Batal
+                  </button>
+                  <div className="flex-[2] flex gap-2">
+                    <button
+                      disabled={exportCategories.length === 0 || activities.filter(a => {
+                        const date = a.date?.toDate();
+                        return date && 
+                          date.getMonth() === exportMonth && 
+                          date.getFullYear() === exportYear && 
+                          exportCategories.includes(a.category);
+                      }).length === 0}
+                      onClick={() => {
+                        handleExportPDF();
+                        setShowExportModal(false);
+                      }}
+                      className="flex-1 py-4 bg-indigo-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:bg-indigo-400 transition-all shadow-xl shadow-indigo-500/20 flex flex-col items-center justify-center gap-1 disabled:opacity-50 disabled:shadow-none"
+                    >
+                      <span>PDF</span>
+                      <FileText size={14} />
+                    </button>
+                    <button
+                      disabled={exportCategories.length === 0 || activities.filter(a => {
+                        const date = a.date?.toDate();
+                        return date && 
+                          date.getMonth() === exportMonth && 
+                          date.getFullYear() === exportYear && 
+                          exportCategories.includes(a.category);
+                      }).length === 0}
+                      onClick={() => {
+                        handleExportWord();
+                        setShowExportModal(false);
+                      }}
+                      className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-500 transition-all shadow-xl shadow-blue-500/20 flex flex-col items-center justify-center gap-1 disabled:opacity-50 disabled:shadow-none"
+                    >
+                      <span>WORD</span>
+                      <BookOpen size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {/* Activity Detail Modal */}
         {selectedActivityForDetail && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -992,34 +1365,32 @@ export default function StudentDetail() {
                   />
                 </div>
 
-                {newActivity.category !== 'Instruktur' && (
-                  <div>
-                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2 font-mono flex justify-between">
-                      Berkas Pendukung (Wajib)
-                      {newActivity.attachment && <span className="text-emerald-400">Terlampir</span>}
-                    </label>
-                    <div className="relative group/upload">
-                      <div className={`w-full px-5 py-4 border-2 border-dashed rounded-2xl transition-all flex items-center gap-4 ${newActivity.attachment ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 group-hover/upload:border-indigo-500/30'}`}>
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${newActivity.attachment ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-white/10 text-slate-400'}`}>
-                          {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
-                        </div>
-                        <div className="flex-1 overflow-hidden">
-                          <p className={`text-[10px] font-black uppercase tracking-widest truncate ${newActivity.attachment ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-500'}`}>
-                            {newActivity.attachment ? newActivity.attachment.name : 'Pilih Berkas (DOCX/PDF/EXCEL)'}
-                          </p>
-                          <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">Max 500KB</p>
-                        </div>
+                <div>
+                  <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2 font-mono flex justify-between">
+                    <span>Berkas Pendukung {categories.find(c => c.name === newActivity.category)?.requiresAttachment ? '(Wajib)' : '(Opsional)'}</span>
+                    {newActivity.attachment && <span className="text-emerald-400">Terlampir</span>}
+                  </label>
+                  <div className="relative group/upload">
+                    <div className={`w-full px-5 py-4 border-2 border-dashed rounded-2xl transition-all flex items-center gap-4 ${newActivity.attachment ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 group-hover/upload:border-indigo-500/30'}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${newActivity.attachment ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-white/10 text-slate-400'}`}>
+                        {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
                       </div>
-                      <input
-                        type="file"
-                        required={newActivity.category !== 'Instruktur'}
-                        accept=".pdf,.docx,.xlsx,.xls"
-                        onChange={(e) => handleActivityFileChange(e)}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
+                      <div className="flex-1 overflow-hidden">
+                        <p className={`text-[10px] font-black uppercase tracking-widest truncate ${newActivity.attachment ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-500'}`}>
+                          {newActivity.attachment ? newActivity.attachment.name : categories.find(c => c.name === newActivity.category)?.requiresAttachment ? 'Pilih Berkas (Wajib)' : 'Pilih Berkas (Opsional)'}
+                        </p>
+                        <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">DOCX, PDF, Excel | Max 500KB</p>
+                      </div>
                     </div>
+                    <input
+                      type="file"
+                      required={categories.find(c => c.name === newActivity.category)?.requiresAttachment}
+                      accept=".pdf,.docx,.xlsx,.xls"
+                      onChange={(e) => handleActivityFileChange(e)}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
                   </div>
-                )}
+                </div>
 
                 <div className="flex gap-4 pt-4">
                   <button
@@ -1112,30 +1483,32 @@ export default function StudentDetail() {
                   />
                 </div>
 
-                {editActivityForm.category !== 'Instruktur' && (
-                  <div>
-                    <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Update Berkas Pendukung</label>
-                    <div className="relative group/editupload">
-                      <div className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center gap-4">
-                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
-                          {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
-                        </div>
-                        <div className="flex-1 overflow-hidden">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-800 dark:text-slate-200 truncate">
-                            {editActivityForm.attachment ? editActivityForm.attachment.name : 'Dibutuhkan berkas baru'}
-                          </p>
-                          <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">DOCX, PDF, Excel | Max 500KB</p>
-                        </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block flex justify-between">
+                    <span>Update Berkas Pendukung {categories.find(c => c.name === editActivityForm.category)?.requiresAttachment ? '(Wajib)' : '(Opsional)'}</span>
+                    {editActivityForm.attachment && <span className="text-indigo-400">Terlampir</span>}
+                  </label>
+                  <div className="relative group/editupload">
+                    <div className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center gap-4">
+                      <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
+                        {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
                       </div>
-                      <input
-                        type="file"
-                        accept=".pdf,.docx,.xlsx,.xls"
-                        onChange={(e) => handleActivityFileChange(e, true)}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
+                      <div className="flex-1 overflow-hidden">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-800 dark:text-slate-200 truncate">
+                          {editActivityForm.attachment ? editActivityForm.attachment.name : categories.find(c => c.name === editActivityForm.category)?.requiresAttachment ? 'Pilih Berkas (Wajib)' : 'Pilih Berkas (Opsional)'}
+                        </p>
+                        <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">DOCX, PDF, Excel | Max 500KB</p>
+                      </div>
                     </div>
+                    <input
+                      type="file"
+                      required={categories.find(c => c.name === editActivityForm.category)?.requiresAttachment}
+                      accept=".pdf,.docx,.xlsx,.xls"
+                      onChange={(e) => handleActivityFileChange(e, true)}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
                   </div>
-                )}
+                </div>
                 
                 <div className="flex flex-col gap-3 pt-4">
                   <button
@@ -1273,14 +1646,17 @@ export default function StudentDetail() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Vokasional</label>
-                  <input
-                    type="text"
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Pilih Vokasional</label>
+                  <select
                     value={editFormData.vocation}
                     onChange={e => setEditFormData({...editFormData, vocation: e.target.value})}
                     className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
-                    placeholder="Contoh: Menjahit, Tata Boga"
-                  />
+                  >
+                    <option value="">Pilih Vokasional...</option>
+                    {vocations.map(v => (
+                      <option key={v.id} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <MultiSelect
