@@ -90,7 +90,8 @@ service cloud.firestore {
       allow update: if isAdmin() || (
         isSignedIn() && 
         request.auth.uid == userId && 
-        incoming().diff(existing()).affectedKeys().hasOnly(['lastActive'])
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastActive', 'forceLogout', 'updatedAt', 'displayName', 'email']) &&
+        (incoming().get('forceLogout', false) == false) // Can only set to false or keep as false
       );
       allow delete: if isAdmin();
     }

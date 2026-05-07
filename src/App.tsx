@@ -14,6 +14,7 @@ import { db } from './lib/firebase';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [sessionStartTime, setSessionStartTime] = useState(Date.now());
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -38,6 +39,7 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        setSessionStartTime(Date.now());
         // Sync user document to ensure they appear in the system user list
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
@@ -117,7 +119,9 @@ export default function App() {
 
     const unsubUser = onSnapshot(doc(db, 'users', user.uid), async (snapshot) => {
       const data = snapshot.data();
-      if (data?.forceLogout === true) {
+      // Only trigger force logout if it happens AFTER the user logged in/session started
+      // Give it a 10 second buffer to allow the login sync to clear the flag
+      if (data?.forceLogout === true && Date.now() - sessionStartTime > 10000) {
         try {
           // Reset the flag first so they can log back in later
           await updateDoc(doc(db, 'users', user.uid), {
