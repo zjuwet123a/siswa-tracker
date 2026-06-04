@@ -53,5 +53,14 @@ export interface Activity {
     backupDriveId?: string;
     backupDriveLink?: string;
   };
+  attachments?: {
+    name: string;
+    type: string;
+    base64: string;
+    driveFileId?: string;
+    driveViewLink?: string;
+    backupDriveId?: string;
+    backupDriveLink?: string;
+  }[];
   createdAt: Timestamp;
 }

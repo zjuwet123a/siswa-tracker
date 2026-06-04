@@ -69,15 +69,16 @@ export default function StudentDetail() {
     category: Activity['category'];
     classActivity: string;
     results: string;
-    attachment: Activity['attachment'] | null;
+    attachments: NonNullable<Activity['attachments']>;
   }>({
     date: new Date().toISOString().split('T')[0],
     category: 'Peksos',
     classActivity: '',
     results: '',
-    attachment: null
+    attachments: []
   });
   const [isAttachmentUploading, setIsAttachmentUploading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [isDriveConnecting, setIsDriveConnecting] = useState(false);
@@ -205,51 +206,49 @@ export default function StudentDetail() {
     if (!studentId || !newActivity.classActivity || !newActivity.results) return;
 
     const selectedCategoryObj = categories.find(c => c.name === newActivity.category);
-    if (selectedCategoryObj?.requiresAttachment && !newActivity.attachment) {
-      alert(`Penyusun '${newActivity.category}' wajib melampirkan berkas pendukung (DOCX, PDF, atau Excel).`);
+    if (selectedCategoryObj?.requiresAttachment && newActivity.attachments.length === 0) {
+      alert(`Penyusun '${newActivity.category}' wajib melampirkan berkas pendukung.`);
       return;
     }
 
     try {
-      let finalAttachment = newActivity.attachment ? { ...newActivity.attachment } : null;
+      const processedAttachments: NonNullable<Activity['attachments']> = [];
 
-      // Jika Drive terhubung, unggah secara bersamaan (User's Personal Drive)
-      if (googleAccessToken && newActivity.attachment) {
-        try {
-          const driveData = await uploadToGoogleDrive(
-            newActivity.attachment.base64,
-            newActivity.attachment.name,
-            newActivity.attachment.type,
-            googleAccessToken
-          );
-          finalAttachment = {
-            ...finalAttachment!,
-            driveFileId: driveData.id,
-            driveViewLink: driveData.webViewLink
-          };
-        } catch (driveErr) {
-          console.error('Personal Drive upload failed:', driveErr);
+      for (const att of newActivity.attachments) {
+        let finalAtt = { ...att };
+
+        // Jika Drive terhubung, unggah secara bersamaan (User's Personal Drive)
+        if (googleAccessToken) {
+          try {
+            const driveData = await uploadToGoogleDrive(
+              att.base64,
+              att.name,
+              att.type,
+              googleAccessToken
+            );
+            finalAtt.driveFileId = driveData.id;
+            finalAtt.driveViewLink = driveData.webViewLink;
+          } catch (driveErr) {
+            console.error('Personal Drive upload failed for', att.name, driveErr);
+          }
         }
-      }
 
-      // Backup Otomatis ke System Drive (akundatakomputer@gmail.com)
-      if (newActivity.attachment) {
+        // Backup Otomatis ke System Drive (akundatakomputer@gmail.com)
         try {
           const backupData = await backupToSystemDrive(
-            newActivity.attachment.base64,
-            newActivity.attachment.name,
-            newActivity.attachment.type,
+            att.base64,
+            att.name,
+            att.type,
             localStudent?.name || 'Unknown'
           );
-          finalAttachment = {
-            ...finalAttachment!,
-            backupDriveId: backupData.fileId,
-            backupDriveLink: backupData.link
-          };
+          finalAtt.backupDriveId = backupData.fileId;
+          finalAtt.backupDriveLink = backupData.link;
         } catch (backupErr) {
-          console.error('System Drive backup failed:', backupErr);
+          console.error('System Drive backup failed for', att.name, backupErr);
           // Kita tidak mematikan flow jika backup gagal, agar data tetap masuk ke Firestore
         }
+
+        processedAttachments.push(finalAtt);
       }
 
       await addDoc(collection(db, `students/${studentId}/activities`), {
@@ -258,7 +257,8 @@ export default function StudentDetail() {
         category: newActivity.category,
         classActivity: newActivity.classActivity.trim(),
         results: newActivity.results.trim(),
-        attachment: finalAttachment,
+        attachment: processedAttachments[0] || null,
+        attachments: processedAttachments,
         createdBy: auth.currentUser?.uid,
         createdByName: auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Unknown',
         createdAt: serverTimestamp()
@@ -268,7 +268,7 @@ export default function StudentDetail() {
         category: activeCategory !== 'Semua' ? activeCategory : 'Peksos',
         classActivity: '',
         results: '',
-        attachment: null
+        attachments: []
       });
       setShowAddModal(false);
       alert('Data aktivitas berhasil disimpan!');
@@ -285,13 +285,13 @@ export default function StudentDetail() {
     category: Activity['category'];
     classActivity: string;
     results: string;
-    attachment: Activity['attachment'] | null;
+    attachments: NonNullable<Activity['attachments']>;
   }>({
     date: '',
     category: 'Peksos',
     classActivity: '',
     results: '',
-    attachment: null
+    attachments: []
   });
   const [showDeleteStudentModal, setShowDeleteStudentModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -349,18 +349,59 @@ export default function StudentDetail() {
     if (!localStudent || !activityToEdit || !editActivityForm.classActivity || !editActivityForm.results) return;
 
     const selectedCategoryObj = categories.find(c => c.name === editActivityForm.category);
-    if (selectedCategoryObj?.requiresAttachment && !editActivityForm.attachment) {
+    if (selectedCategoryObj?.requiresAttachment && editActivityForm.attachments.length === 0) {
       alert(`Penyusun '${editActivityForm.category}' wajib melampirkan berkas pendukung.`);
       return;
     }
 
     try {
+      const processedAttachments: NonNullable<Activity['attachments']> = [];
+
+      for (const att of editActivityForm.attachments) {
+        let finalAtt = { ...att };
+
+        // Jika tidak memiliki ID backup system, unggah
+        if (!finalAtt.backupDriveId) {
+          try {
+            const backupData = await backupToSystemDrive(
+              att.base64,
+              att.name,
+              att.type,
+              localStudent?.name || 'Unknown'
+            );
+            finalAtt.backupDriveId = backupData.fileId;
+            finalAtt.backupDriveLink = backupData.link;
+          } catch (backupErr) {
+            console.error('System Drive backup failed in edit for', att.name, backupErr);
+          }
+        }
+
+        // Jika Drive terhubung dan tidak memiliki ID personal drive, unggah
+        if (googleAccessToken && !finalAtt.driveFileId) {
+          try {
+            const driveData = await uploadToGoogleDrive(
+              att.base64,
+              att.name,
+              att.type,
+              googleAccessToken
+            );
+            finalAtt.driveFileId = driveData.id;
+            finalAtt.driveViewLink = driveData.webViewLink;
+          } catch (driveErr) {
+            console.error('Personal Drive upload failed in edit for', att.name, driveErr);
+          }
+        }
+
+        processedAttachments.push(finalAtt);
+      }
+
       await updateDoc(doc(db, `students/${localStudent.id}/activities`, activityToEdit.id), {
         date: Timestamp.fromDate(new Date(editActivityForm.date)),
         category: editActivityForm.category,
         classActivity: editActivityForm.classActivity.trim(),
         results: editActivityForm.results.trim(),
-        attachment: editActivityForm.attachment || null,
+        attachment: processedAttachments[0] || null,
+        attachments: processedAttachments,
         updatedAt: serverTimestamp()
       });
       setActivityToEdit(null);
@@ -371,42 +412,88 @@ export default function StudentDetail() {
     }
   };
 
-  const handleActivityFileChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean = false) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const readFileAsDataURL = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
 
-    const validExtensions = ['.docx', '.pdf', '.xlsx', '.xls'];
-    const fileName = file.name.toLowerCase();
-    const isValid = validExtensions.some(ext => fileName.endsWith(ext));
+  const handleActivityFileChange = async (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean = false) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    if (!isValid) {
-      alert('Format file tidak didukung. Gunakan DOCX, PDF, atau Excel.');
-      e.target.value = '';
-      return;
-    }
+    const validExtensions = ['.docx', '.pdf', '.xlsx', '.xls', '.jpeg', '.jpg', '.png'];
+    setIsAttachmentUploading(true);
+    setFileError(null);
 
-    if (file.size > 500 * 1024) {
-      alert('Ukuran file maksimal 500KB');
-      e.target.value = '';
-      return;
-    }
+    try {
+      const newAttachments: NonNullable<Activity['attachments']> = [];
+      const errorsList: string[] = [];
 
-    const reader = new FileReader();
-    reader.onloadstart = () => setIsAttachmentUploading(true);
-    reader.onload = (event) => {
-      const attachment = {
-        name: file.name,
-        type: file.type,
-        base64: event.target?.result as string
-      };
-      if (isEdit) {
-        setEditActivityForm(prev => ({ ...prev, attachment }));
-      } else {
-        setNewActivity(prev => ({ ...prev, attachment }));
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileName = file.name.toLowerCase();
+        const isValid = validExtensions.some(ext => fileName.endsWith(ext));
+
+        if (!isValid) {
+          errorsList.push(`'${file.name}': format tidak didukung (gunakan PDF, DOCX, Excel, PNG, JPG).`);
+          continue;
+        }
+
+        if (file.size > 500 * 1024) {
+          errorsList.push(`'${file.name}': ukuran ${(file.size / 1024).toFixed(0)}KB melebihi batas 500KB.`);
+          continue;
+        }
+
+        const base64 = await readFileAsDataURL(file);
+        newAttachments.push({
+          name: file.name,
+          type: file.type,
+          base64: base64
+        });
       }
+
+      if (errorsList.length > 0) {
+        setFileError(errorsList.join(' | '));
+      }
+
+      if (newAttachments.length > 0) {
+        if (isEdit) {
+          setEditActivityForm(prev => ({
+            ...prev,
+            attachments: [...prev.attachments, ...newAttachments]
+          }));
+        } else {
+          setNewActivity(prev => ({
+            ...prev,
+            attachments: [...prev.attachments, ...newAttachments]
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Gagal membaca berkas:", err);
+      setFileError("Terjadi kesalahan saat mengunggah berkas.");
+    } finally {
       setIsAttachmentUploading(false);
-    };
-    reader.readAsDataURL(file);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveAttachment = (index: number, isEdit: boolean = false) => {
+    if (isEdit) {
+      setEditActivityForm(prev => ({
+        ...prev,
+        attachments: prev.attachments.filter((_, idx) => idx !== index)
+      }));
+    } else {
+      setNewActivity(prev => ({
+        ...prev,
+        attachments: prev.attachments.filter((_, idx) => idx !== index)
+      }));
+    }
   };
 
   const downloadAttachment = (attachment: Activity['attachment']) => {
@@ -420,13 +507,14 @@ export default function StudentDetail() {
   };
 
   const openEditActivityModal = (activity: Activity) => {
+    setFileError(null);
     setActivityToEdit(activity);
     setEditActivityForm({
       date: activity.date?.toDate().toISOString().split('T')[0] || '',
       category: activity.category || 'Peksos',
       classActivity: activity.classActivity,
       results: activity.results,
-      attachment: activity.attachment || null
+      attachments: activity.attachments || (activity.attachment ? [activity.attachment] : [])
     });
   };
 
@@ -860,7 +948,7 @@ export default function StudentDetail() {
             
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setShowAddModal(true)}
+                onClick={() => { setFileError(null); setShowAddModal(true); }}
                 className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest px-6 py-2.5 rounded-full bg-slate-900 dark:bg-indigo-600 text-white hover:bg-slate-800 dark:hover:bg-indigo-500 transition-all shadow-lg shadow-slate-200 dark:shadow-none shrink-0"
               >
                 <Plus size={14} />
@@ -1264,18 +1352,31 @@ export default function StudentDetail() {
                       <p className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase">{selectedActivityForDetail.createdByName || '-'}</p>
                     </div>
                   </div>
-                  {selectedActivityForDetail.attachment && (
-                    <button 
-                      onClick={() => {
-                        setPreviewAttachment(selectedActivityForDetail.attachment!);
-                        setSelectedActivityForDetail(null);
-                      }}
-                      className="flex items-center gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all font-mono"
-                    >
-                      <Paperclip size={16} />
-                      Lihat Berkas Lampiran
-                    </button>
-                  )}
+                  {(() => {
+                    const detailAttachments = selectedActivityForDetail.attachments || (selectedActivityForDetail.attachment ? [selectedActivityForDetail.attachment] : []);
+                    if (detailAttachments.length === 0) return null;
+                    return (
+                      <div className="flex flex-col gap-2 max-w-full">
+                        <p className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Berkas Lampiran ({detailAttachments.length})</p>
+                        <div className="flex flex-wrap gap-2">
+                          {detailAttachments.map((att, idx) => (
+                            <button 
+                              key={idx}
+                              onClick={() => {
+                                setPreviewAttachment(att);
+                                setSelectedActivityForDetail(null);
+                              }}
+                              className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-4 py-2.5 rounded-xl text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all max-w-[200px] truncate"
+                              title={att.name}
+                            >
+                              <Paperclip size={14} className="shrink-0" />
+                              <span className="truncate">{att.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </motion.div>
@@ -1306,93 +1407,147 @@ export default function StudentDetail() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-xl rounded-[3rem] shadow-2xl p-10 overflow-hidden border border-slate-200 dark:border-white/10"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-xl rounded-[3rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-slate-200 dark:border-white/10"
             >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/5 dark:bg-indigo-600/10 rounded-full blur-3xl" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/5 dark:bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
               
-              <h2 className="text-2xl font-black mb-8 tracking-tight uppercase flex items-center gap-3 text-slate-800 dark:text-white">
-                <Plus className="text-indigo-500" />
-                Input Laporan
-              </h2>
+              {/* Header: Fixed */}
+              <div className="px-10 pt-8 pb-4 flex justify-between items-center bg-white dark:bg-slate-900 z-10 shrink-0">
+                <h2 className="text-2xl font-black tracking-tight uppercase flex items-center gap-3 text-slate-800 dark:text-white">
+                  <Plus className="text-indigo-500 shrink-0" />
+                  Input Laporan
+                </h2>
+                <button 
+                  onClick={() => setShowAddModal(false)}
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full transition-all"
+                  type="button"
+                >
+                  <X size={20} />
+                </button>
+              </div>
               
-              <form onSubmit={handleAddActivity} className="space-y-5">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Tanggal</label>
-                    <input
-                      type="date"
-                      required
-                      value={newActivity.date}
-                      onChange={e => setNewActivity({...newActivity, date: e.target.value})}
-                      className="w-full px-4 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-bold text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all uppercase tracking-widest"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Penyusun</label>
-                    <select
-                      value={newActivity.category}
-                      onChange={e => setNewActivity({...newActivity, category: e.target.value as any})}
-                      className="w-full px-4 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-bold text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all uppercase tracking-widest appearance-none"
-                    >
-                      {CATEGORY_OPTIONS.map(cat => (
-                        <option key={cat} value={cat} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">{cat}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Laporan</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={newActivity.classActivity}
-                    onChange={e => setNewActivity({...newActivity, classActivity: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans"
-                    placeholder="Apa laporan kegiatan hari ini?"
-                  />
-                </div>
-                
-                <div>
-                  <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Hasil Kegiatan</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={newActivity.results}
-                    onChange={e => setNewActivity({...newActivity, results: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans mb-4"
-                    placeholder="Bagaimana hasil kegiatannya?"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2 font-mono flex justify-between">
-                    <span>Berkas Pendukung {categories.find(c => c.name === newActivity.category)?.requiresAttachment ? '(Wajib)' : '(Opsional)'}</span>
-                    {newActivity.attachment && <span className="text-emerald-400">Terlampir</span>}
-                  </label>
-                  <div className="relative group/upload">
-                    <div className={`w-full px-5 py-4 border-2 border-dashed rounded-2xl transition-all flex items-center gap-4 ${newActivity.attachment ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 group-hover/upload:border-indigo-500/30'}`}>
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${newActivity.attachment ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-white/10 text-slate-400'}`}>
-                        {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
-                      </div>
-                      <div className="flex-1 overflow-hidden">
-                        <p className={`text-[10px] font-black uppercase tracking-widest truncate ${newActivity.attachment ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-500'}`}>
-                          {newActivity.attachment ? newActivity.attachment.name : categories.find(c => c.name === newActivity.category)?.requiresAttachment ? 'Pilih Berkas (Wajib)' : 'Pilih Berkas (Opsional)'}
-                        </p>
-                        <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">DOCX, PDF, Excel | Max 500KB</p>
-                      </div>
+              {/* Form Content: Scrollable */}
+              <form onSubmit={handleAddActivity} className="flex-1 min-h-0 flex flex-col">
+                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-10 pb-2 space-y-5">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Tanggal</label>
+                      <input
+                        type="date"
+                        required
+                        value={newActivity.date}
+                        onChange={e => setNewActivity({...newActivity, date: e.target.value})}
+                        className="w-full px-4 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-bold text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all uppercase tracking-widest"
+                      />
                     </div>
-                    <input
-                      type="file"
-                      required={categories.find(c => c.name === newActivity.category)?.requiresAttachment}
-                      accept=".pdf,.docx,.xlsx,.xls"
-                      onChange={(e) => handleActivityFileChange(e)}
-                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    <div>
+                      <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Penyusun</label>
+                      <select
+                        value={newActivity.category}
+                        onChange={e => setNewActivity({...newActivity, category: e.target.value as any})}
+                        className="w-full px-4 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-bold text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all uppercase tracking-widest appearance-none"
+                      >
+                        {CATEGORY_OPTIONS.map(cat => (
+                          <option key={cat} value={cat} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Laporan</label>
+                    <textarea
+                      required
+                      rows={3}
+                      value={newActivity.classActivity}
+                      onChange={e => setNewActivity({...newActivity, classActivity: e.target.value})}
+                      className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans"
+                      placeholder="Apa laporan kegiatan hari ini?"
                     />
+                  </div>
+                  
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2">Hasil Kegiatan</label>
+                    <textarea
+                      required
+                      rows={3}
+                      value={newActivity.results}
+                      onChange={e => setNewActivity({...newActivity, results: e.target.value})}
+                      className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans mb-4"
+                      placeholder="Bagaimana hasil kegiatannya?"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-2 font-mono flex justify-between">
+                      <span>Berkas Pendukung {categories.find(c => c.name === newActivity.category)?.requiresAttachment ? '(Wajib)' : '(Opsional)'}</span>
+                      {newActivity.attachments.length > 0 && <span className="text-emerald-400 font-bold">{newActivity.attachments.length} Berkas Terpilih</span>}
+                    </label>
+                    
+                    {fileError && (
+                      <div className="mb-4 p-3.5 bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 rounded-2xl flex items-start gap-2.5 text-rose-600 dark:text-rose-400">
+                        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                        <div className="text-[10px] font-medium leading-relaxed flex-1">
+                          {fileError}
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={() => setFileError(null)} 
+                          className="text-[10px] uppercase font-bold tracking-widest text-rose-500 hover:text-rose-700 dark:hover:text-rose-300 shrink-0"
+                        >
+                          Tutup
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="relative group/upload mb-3">
+                      <div className={`w-full px-5 py-4 border-2 border-dashed rounded-2xl transition-all flex items-center gap-4 ${newActivity.attachments.length > 0 ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 group-hover/upload:border-indigo-500/30'}`}>
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${newActivity.attachments.length > 0 ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-white/10 text-slate-400'}`}>
+                          {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                          <p className={`text-[10px] font-black uppercase tracking-widest truncate ${newActivity.attachments.length > 0 ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-400 dark:text-slate-500'}`}>
+                            {newActivity.attachments.length > 0 ? `${newActivity.attachments.length} Berkas Terlampir` : categories.find(c => c.name === newActivity.category)?.requiresAttachment ? 'Pilih Berkas (Wajib)' : 'Pilih Berkas (Opsional)'}
+                          </p>
+                          <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">PDF, DOCX, Excel, Images (JPEG, JPG, PNG) | Max 500KB per file</p>
+                        </div>
+                      </div>
+                      <input
+                        type="file"
+                        multiple
+                        required={categories.find(c => c.name === newActivity.category)?.requiresAttachment && newActivity.attachments.length === 0}
+                        accept=".pdf,.docx,.xlsx,.xls,.jpeg,.jpg,.png"
+                        onChange={(e) => handleActivityFileChange(e)}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* List of uploaded files with delete option */}
+                    {newActivity.attachments.length > 0 && (
+                      <div className="flex flex-col gap-1.5 mb-4 max-h-[150px] overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-white/5 p-3 rounded-2xl border border-slate-100 dark:border-white/5">
+                        {newActivity.attachments.map((att, idx) => (
+                          <div key={idx} className="flex items-center justify-between gap-3 bg-white dark:bg-slate-800 px-3 py-2 rounded-xl border border-slate-100 dark:border-slate-700">
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <span className="text-slate-400 shrink-0"><Paperclip size={12} /></span>
+                              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-200 truncate">{att.name}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAttachment(idx, false)}
+                              className="p-1 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 rounded-lg transition-all shrink-0"
+                              title="Hapus berkas"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex gap-4 pt-4">
+                {/* Footer: Fixed */}
+                <div className="px-10 py-6 border-t border-slate-50 dark:border-slate-800/20 shrink-0 bg-slate-50/50 dark:bg-slate-900/50 flex gap-4">
                   <button
                     type="button"
                     onClick={() => setShowAddModal(false)}
@@ -1427,90 +1582,149 @@ export default function StudentDetail() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-transparent dark:border-white/10"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-xl rounded-[3rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-transparent dark:border-white/10"
             >
-              <div className="flex items-center gap-4 mb-8">
-                <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center">
-                  <Edit2 size={24} />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/5 dark:bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Header: Fixed */}
+              <div className="px-10 pt-8 pb-4 flex justify-between items-center bg-white dark:bg-slate-900 z-10 shrink-0 border-b border-slate-50 dark:border-slate-800/50">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center">
+                    <Edit2 size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Edit Kegiatan</h3>
+                    <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Ubah riwayat belajar ini</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Edit Kegiatan</h3>
-                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Ubah riwayat belajar ini</p>
-                </div>
+                <button 
+                  onClick={() => setActivityToEdit(null)}
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full transition-all"
+                  type="button"
+                >
+                  <X size={20} />
+                </button>
               </div>
 
-              <form onSubmit={handleEditActivity} className="space-y-6">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Tanggal Kegiatan</label>
-                  <input
-                    type="date"
-                    required
-                    value={editActivityForm.date}
-                    onChange={e => setEditActivityForm({...editActivityForm, date: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Penyusun Laporan</label>
-                  <select
-                    value={editActivityForm.category}
-                    onChange={e => setEditActivityForm({...editActivityForm, category: e.target.value as any})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
-                  >
-                    {CATEGORY_OPTIONS.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Laporan</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={editActivityForm.classActivity}
-                    onChange={e => setEditActivityForm({...editActivityForm, classActivity: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-y min-h-[100px] outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Hasil Kegiatan</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={editActivityForm.results}
-                    onChange={e => setEditActivityForm({...editActivityForm, results: e.target.value})}
-                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-y min-h-[100px] outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block flex justify-between">
-                    <span>Update Berkas Pendukung {categories.find(c => c.name === editActivityForm.category)?.requiresAttachment ? '(Wajib)' : '(Opsional)'}</span>
-                    {editActivityForm.attachment && <span className="text-indigo-400">Terlampir</span>}
-                  </label>
-                  <div className="relative group/editupload">
-                    <div className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center gap-4">
-                      <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
-                        {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
-                      </div>
-                      <div className="flex-1 overflow-hidden">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-800 dark:text-slate-200 truncate">
-                          {editActivityForm.attachment ? editActivityForm.attachment.name : categories.find(c => c.name === editActivityForm.category)?.requiresAttachment ? 'Pilih Berkas (Wajib)' : 'Pilih Berkas (Opsional)'}
-                        </p>
-                        <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">DOCX, PDF, Excel | Max 500KB</p>
-                      </div>
+              {/* Form Content: Scrollable */}
+              <form onSubmit={handleEditActivity} className="flex-1 min-h-0 flex flex-col">
+                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-10 py-6 space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Tanggal Kegiatan</label>
+                      <input
+                        type="date"
+                        required
+                        value={editActivityForm.date}
+                        onChange={e => setEditActivityForm({...editActivityForm, date: e.target.value})}
+                        className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
+                      />
                     </div>
-                    <input
-                      type="file"
-                      required={categories.find(c => c.name === editActivityForm.category)?.requiresAttachment}
-                      accept=".pdf,.docx,.xlsx,.xls"
-                      onChange={(e) => handleActivityFileChange(e, true)}
-                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Penyusun Laporan</label>
+                      <select
+                        value={editActivityForm.category}
+                        onChange={e => setEditActivityForm({...editActivityForm, category: e.target.value as any})}
+                        className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 outline-none text-xs font-bold uppercase tracking-widest text-slate-800 dark:text-white"
+                      >
+                        {CATEGORY_OPTIONS.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Laporan</label>
+                    <textarea
+                      required
+                      rows={3}
+                      value={editActivityForm.classActivity}
+                      onChange={e => setEditActivityForm({...editActivityForm, classActivity: e.target.value})}
+                      className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-y min-h-[100px] outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
                     />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block">Hasil Kegiatan</label>
+                    <textarea
+                      required
+                      rows={3}
+                      value={editActivityForm.results}
+                      onChange={e => setEditActivityForm({...editActivityForm, results: e.target.value})}
+                      className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-y min-h-[100px] outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 block flex justify-between">
+                      <span>Update Berkas Pendukung {categories.find(c => c.name === editActivityForm.category)?.requiresAttachment ? '(Wajib)' : '(Opsional)'}</span>
+                      {editActivityForm.attachments.length > 0 && <span className="text-indigo-400 font-bold">{editActivityForm.attachments.length} Berkas Terpilih</span>}
+                    </label>
+
+                    {fileError && (
+                      <div className="mb-4 p-3.5 bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 rounded-2xl flex items-start gap-2.5 text-rose-600 dark:text-rose-400">
+                        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                        <div className="text-[10px] font-medium leading-relaxed flex-1">
+                          {fileError}
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={() => setFileError(null)} 
+                          className="text-[10px] uppercase font-bold tracking-widest text-rose-500 hover:text-rose-700 dark:hover:text-rose-300 shrink-0"
+                        >
+                          Tutup
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="relative group/editupload mb-3">
+                      <div className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center gap-4">
+                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
+                          {isAttachmentUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-800 dark:text-slate-200 truncate">
+                            {editActivityForm.attachments.length > 0 ? `${editActivityForm.attachments.length} Berkas Terlampir` : categories.find(c => c.name === editActivityForm.category)?.requiresAttachment ? 'Pilih Berkas (Wajib)' : 'Pilih Berkas (Opsional)'}
+                          </p>
+                          <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase">PDF, DOCX, Excel, Images (JPEG, JPG, PNG) | Max 500KB per file</p>
+                        </div>
+                      </div>
+                      <input
+                        type="file"
+                        multiple
+                        required={categories.find(c => c.name === editActivityForm.category)?.requiresAttachment && editActivityForm.attachments.length === 0}
+                        accept=".pdf,.docx,.xlsx,.xls,.jpeg,.jpg,.png"
+                        onChange={(e) => handleActivityFileChange(e, true)}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* List of uploaded files with delete option in Edit */}
+                    {editActivityForm.attachments.length > 0 && (
+                      <div className="flex flex-col gap-1.5 mb-4 max-h-[150px] overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-800 p-3 rounded-2xl border border-slate-100 dark:border-slate-700">
+                        {editActivityForm.attachments.map((att, idx) => (
+                          <div key={idx} className="flex items-center justify-between gap-3 bg-white dark:bg-slate-900 px-3 py-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <span className="text-slate-400 shrink-0"><Paperclip size={12} /></span>
+                              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-200 truncate">{att.name}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAttachment(idx, true)}
+                              className="p-1 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 rounded-lg transition-all shrink-0"
+                              title="Hapus berkas"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 
-                <div className="flex flex-col gap-3 pt-4">
+                {/* Footer: Fixed */}
+                <div className="px-10 py-6 border-t border-slate-50 dark:border-slate-800/20 shrink-0 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col gap-3">
                   <button
                     type="submit"
                     className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 dark:shadow-none"

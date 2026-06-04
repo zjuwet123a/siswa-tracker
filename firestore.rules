@@ -51,7 +51,7 @@ service cloud.firestore {
              data.date is timestamp &&
              data.category is string && data.category.size() > 0 &&
              data.classActivity is string && data.classActivity.size() > 0 && data.classActivity.size() <= 2000 &&
-             data.results is string && data.results.size() > 0 && data.results.size() <= 2000 &&
+             data.results is string && data.results.size() > 0 &&
              (data.attachment == null || (
                data.attachment is map &&
                data.attachment.keys().hasAll(['name', 'type', 'base64']) &&
@@ -61,6 +61,9 @@ service cloud.firestore {
                data.attachment.base64.size() <= 1000000 &&
                (data.attachment.get('driveFileId', null) == null || data.attachment.driveFileId is string) &&
                (data.attachment.get('driveViewLink', null) == null || data.attachment.driveViewLink is string)
+             )) &&
+             (data.get('attachments', null) == null || (
+               data.attachments is list
              )) &&
              data.createdAt is timestamp &&
              (data.get('updatedAt', null) == null || data.updatedAt is timestamp);
