@@ -201,6 +201,8 @@ export default function StudentDetail() {
     photoUrl: ''
   });
 
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
+
   const handleAddActivity = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentId || !newActivity.classActivity || !newActivity.results) return;
@@ -595,16 +597,18 @@ export default function StudentDetail() {
       // Header - Centered as per screenshot
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(12);
-      const title1 = 'MATERI TERAPI VOKASIONAL PENERIMA MANFAAT';
-      const title2 = `SENTRA "MAHATMIYA" DI BALI TAHUN ${exportYear}`;
+      const title1 = 'HASIL KEGIATAN PROSES REHABILITASI SOSIAL';
+      const title2 = 'PENERIMA MANFAAT RESIDENSIAL';
+      const title3 = 'SENTRA " MAHATMIYA " BALI';
       
       doc.text(title1, (pageWidth - doc.getTextWidth(title1)) / 2, 20);
       doc.text(title2, (pageWidth - doc.getTextWidth(title2)) / 2, 27);
+      doc.text(title3, (pageWidth - doc.getTextWidth(title3)) / 2, 34);
 
       // Metadata Section
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
-      const startMetaY = 45;
+      const startMetaY = 50;
       const lineSpacing = 8;
       const columnOffset = 40;
 
@@ -617,29 +621,11 @@ export default function StudentDetail() {
       // Show the student's vocation (class activity) instead of category name
       doc.text(localStudent.vocation || category, columnOffset + 3, startMetaY + lineSpacing);
       
-      doc.text('Instruktur', 14, startMetaY + (lineSpacing * 2));
+      doc.text('Petugas', 14, startMetaY + (lineSpacing * 2));
       doc.text(':', columnOffset, startMetaY + (lineSpacing * 2));
+      doc.text(category, columnOffset + 3, startMetaY + (lineSpacing * 2));
       
-      // Get instructors from vocation
-      const studentVocation = vocations.find(v => v.name === localStudent.vocation);
-      const vocationInstructors = studentVocation?.instructors || [];
-      
-      let instructorsLineCount = 0;
-      if (vocationInstructors.length > 0) {
-        vocationInstructors.forEach((instructor, idx) => {
-          doc.text(instructor, columnOffset + 3, startMetaY + (lineSpacing * (2 + idx)));
-          instructorsLineCount = idx + 1;
-        });
-      }
-      
-      // If no vocation instructors found, fallback to creator name of the first activity in this category
-      if (vocationInstructors.length === 0) {
-        const firstActivity = filteredForPDF[0];
-        if (firstActivity?.createdByName) {
-          doc.text(firstActivity.createdByName, columnOffset + 3, startMetaY + (lineSpacing * 2));
-          instructorsLineCount = 1;
-        }
-      }
+      let instructorsLineCount = 1;
 
       const tableData = filteredForPDF.map((activity, index) => [
         (index + 1).toString(),
@@ -685,7 +671,7 @@ export default function StudentDetail() {
       return;
     }
 
-    doc.save(`Form_Materi_${localStudent.name.replace(/\s+/g, '_')}_${monthNames[exportMonth]}.pdf`);
+    doc.save(`Hasil_Kegiatan_${localStudent.name.replace(/\s+/g, '_')}_${monthNames[exportMonth]}.pdf`);
   };
 
   const handleExportWord = async () => {
@@ -710,12 +696,6 @@ export default function StudentDetail() {
       if (filteredActivities.length === 0) continue;
 
       // Group activities by category for the Word doc
-      const studentVocation = vocations.find(v => v.name === localStudent.vocation);
-      const vocationInstructors = studentVocation?.instructors || [];
-      const instructors = vocationInstructors.length > 0 
-        ? vocationInstructors 
-        : [filteredActivities[0]?.createdByName || '-'];
-
       const tableRows = [
         new TableRow({
           children: [
@@ -747,7 +727,7 @@ export default function StudentDetail() {
             alignment: AlignmentType.CENTER,
             children: [
               new TextRun({
-                text: "MATERI TERAPI VOKASIONAL PENERIMA MANFAAT",
+                text: "HASIL KEGIATAN PROSES REHABILITASI SOSIAL",
                 bold: true,
                 size: 24,
               }),
@@ -757,7 +737,17 @@ export default function StudentDetail() {
             alignment: AlignmentType.CENTER,
             children: [
               new TextRun({
-                text: `SENTRA "MAHATMIYA" DI BALI TAHUN ${exportYear}`,
+                text: "PENERIMA MANFAAT RESIDENSIAL",
+                bold: true,
+                size: 24,
+              }),
+            ],
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [
+              new TextRun({
+                text: 'SENTRA " MAHATMIYA " BALI',
                 bold: true,
                 size: 24,
               }),
@@ -789,8 +779,8 @@ export default function StudentDetail() {
               }),
               new TableRow({
                 children: [
-                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Instruktur", size: 21 })] })] }),
-                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ": " + instructors.join(", "), size: 21 })] })] }),
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Petugas", size: 21 })] })] }),
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: ": " + category, size: 21 })] })] }),
                 ],
               }),
             ],
@@ -822,7 +812,7 @@ export default function StudentDetail() {
     });
 
     const blob = await Packer.toBlob(doc);
-    saveAs(blob, `Form_Materi_${localStudent.name.replace(/\s+/g, '_')}_${monthNames[exportMonth]}.docx`);
+    saveAs(blob, `Hasil_Kegiatan_${localStudent.name.replace(/\s+/g, '_')}_${monthNames[exportMonth]}.docx`);
   };
 
   if (loading) {
@@ -900,9 +890,19 @@ export default function StudentDetail() {
           <div className="absolute top-[-30px] right-[-30px] w-64 h-64 bg-white/10 rounded-full blur-3xl animate-pulse" />
           
           {/* Profile Photo */}
-          <div className="relative z-10 w-48 h-48 rounded-[2.5rem] bg-indigo-500/30 dark:bg-black/20 border-4 border-white/20 overflow-hidden flex-shrink-0 shadow-2xl flex items-center justify-center">
-            {localStudent.photoUrl ? (
-              <img src={localStudent.photoUrl} alt={localStudent.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          <div 
+            onClick={() => { if (localStudent?.photoUrl) setShowPhotoModal(true); }}
+            className={`relative z-10 w-48 h-48 rounded-[2.5rem] bg-indigo-500/30 dark:bg-black/20 border-4 border-white/20 overflow-hidden flex-shrink-0 shadow-2xl flex items-center justify-center transition-all duration-300 ${localStudent?.photoUrl ? 'cursor-pointer hover:scale-[1.03] active:scale-[0.98] group' : ''}`}
+          >
+            {localStudent?.photoUrl ? (
+              <>
+                <img src={localStudent.photoUrl} alt={localStudent.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
+                <div className="absolute inset-0 bg-indigo-950/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-all duration-300">
+                    <Eye size={22} className="text-white" />
+                  </div>
+                </div>
+              </>
             ) : (
               <User size={80} className="text-white/20" strokeWidth={1} />
             )}
@@ -931,8 +931,8 @@ export default function StudentDetail() {
             
             <div className="flex gap-12 border-t border-white/10 dark:border-white/5 pt-8">
               <div className="space-y-1">
-                <p className="text-[9px] text-indigo-200 dark:text-indigo-300 uppercase font-black tracking-widest opacity-60">Total Sesi Belajar (Instruktur)</p>
-                <p className="text-3xl font-black">{activities.filter(a => a.category === 'Instruktur').length}</p>
+                <p className="text-[9px] text-indigo-200 dark:text-indigo-300 uppercase font-black tracking-widest opacity-60">Total Laporan</p>
+                <p className="text-3xl font-black">{activities.length}</p>
               </div>
             </div>
           </div>
@@ -1953,6 +1953,47 @@ export default function StudentDetail() {
             </motion.div>
           </div>
         )}
+        {/* Profile Photo Lightbox Modal */}
+        {showPhotoModal && localStudent?.photoUrl && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowPhotoModal(false)}
+              className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative max-w-4xl max-h-[85vh] z-10 flex flex-col items-center"
+            >
+              <button
+                onClick={() => setShowPhotoModal(false)}
+                className="absolute -top-16 right-0 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full backdrop-blur-md border border-white/10 transition-all hover:scale-105"
+                title="Tutup"
+              >
+                <X size={24} />
+              </button>
+              
+              <img 
+                src={localStudent.photoUrl} 
+                alt={localStudent.name} 
+                className="max-w-full max-h-[75vh] object-contain rounded-3xl shadow-2xl border-4 border-white/10"
+                referrerPolicy="no-referrer"
+              />
+              
+              <div className="mt-4 px-6 py-3 bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl text-center">
+                <p className="text-white text-sm font-black uppercase tracking-widest">{localStudent.name}</p>
+                {localStudent.vocation && (
+                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest mt-0.5">{localStudent.vocation}</p>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {/* Preview Attachment Modal */}
         {previewAttachment && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
