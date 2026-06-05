@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
 import { Student, Activity, Category, Cluster, Vocation } from '../types';
-import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2, Eye, X, Shield, Briefcase } from 'lucide-react';
+import { ArrowLeft, Calendar, BookOpen, Clock, CheckCircle2, AlertCircle, Plus, Send, Trash2, Edit2, Download, User, Loader2, FileText, Paperclip, ExternalLink, Share2, Eye, X, Shield, Briefcase, TrendingUp, TrendingDown, Sparkles, Minus, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -69,12 +69,14 @@ export default function StudentDetail() {
     category: Activity['category'];
     classActivity: string;
     results: string;
+    score: number;
     attachments: NonNullable<Activity['attachments']>;
   }>({
     date: new Date().toISOString().split('T')[0],
     category: 'Peksos',
     classActivity: '',
     results: '',
+    score: 0,
     attachments: []
   });
   const [isAttachmentUploading, setIsAttachmentUploading] = useState(false);
@@ -202,6 +204,274 @@ export default function StudentDetail() {
   });
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [chartCategory, setChartCategory] = useState('Semua');
+  const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; act: Activity; score: number } | null>(null);
+  const [expandedActivityIds, setExpandedActivityIds] = useState<string[]>([]);
+
+  const toggleActivityExpanded = (id: string) => {
+    setExpandedActivityIds(prev => 
+      prev.includes(id) 
+        ? prev.filter(item => item !== id) 
+        : [...prev, id]
+    );
+  };
+
+  const renderInteractiveScoreBadge = (score: number) => {
+    const isAuto = !score || score <= 0;
+    
+    let containerClass = "";
+    let label = "";
+    
+    if (isAuto) {
+      containerClass = "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 animate-pulse";
+      label = "Otomatis Mendeteksi";
+    } else {
+      if (score >= 9) {
+        containerClass = "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400";
+        label = "Sangat Mandiri";
+      } else if (score >= 7) {
+        containerClass = "bg-indigo-50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-400";
+        label = "Mandiri";
+      } else if (score >= 5) {
+        containerClass = "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400";
+        label = "Berkembang";
+      } else if (score >= 3) {
+        containerClass = "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-400";
+        label = "Perlu Bantuan";
+      } else {
+        containerClass = "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400";
+        label = "Bantuan Penuh";
+      }
+    }
+
+    return (
+      <div className="flex items-center gap-2">
+        {!isAuto && (
+          <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 font-mono bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-1.5 rounded-lg min-w-[50px] text-center shadow-sm">
+            {score}
+          </span>
+        )}
+        <span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-lg border shadow-sm ${containerClass}`}>
+          {label}
+        </span>
+      </div>
+    );
+  };
+
+  // Dynamic semantic progress scoring engine (Out of 10)
+  const getProgressAnalysis = (textStr: string) => {
+    const text = (textStr || "").toLowerCase();
+    
+    const keywords = [
+      { score: 10, level: "Sangat Mandiri", color: "bg-emerald-500", textColor: "text-emerald-600 dark:text-emerald-400 border-emerald-100", list: ["sangat baik", "sangat mandiri", "luar biasa", "tuntas", "sempurna", "sangat lancar", "tanpa bantuan", "sepenuhnya mandiri"] },
+      { score: 8, level: "Mandiri / Baik", color: "bg-indigo-500", textColor: "text-indigo-600 dark:text-indigo-400 border-indigo-100", list: ["baik", "mandiri", "lancar", "meningkat", "berkembang", "berhasil", "stabil", "bisa sendiri"] },
+      { score: 6, level: "Cukup / Berkembang", color: "bg-amber-500", textColor: "text-amber-600 dark:text-amber-400 border-amber-100", list: ["cukup", "sedang berkembang", "mulai mandiri", "perlu bimbingan", "dengan bimbingan", "bimbingan minimal", "mulai bisa"] },
+      { score: 4, level: "Perlu Bantuan", color: "bg-orange-500", textColor: "text-orange-600 dark:text-orange-400 border-orange-100", list: ["kurang mandiri", "kurang", "belum mandiri", "butuh bantuan", "bila dibantu", "perlu dukungan", "sering dibimbing", "masih dibantu"] },
+      { score: 2, level: "Bantuan Penuh", color: "bg-rose-500", textColor: "text-rose-600 dark:text-rose-400 border-rose-100", list: ["sangat kurang", "tidak bisa", "tidak mandiri", "belum berkembang", "selalu dibantu", "perlu bantuan penuh", "tergantung penuh", "tidak ada perkembangan", "bantuan penuh", "sepenuhnya dibantu"] }
+    ];
+
+    const getMetaForScore = (s: number) => {
+      if (s >= 9) {
+        return { level: "Sangat Mandiri", color: "bg-emerald-500", textColor: "text-emerald-600 dark:text-emerald-400 border-emerald-100" };
+      } else if (s >= 7) {
+        return { level: "Mandiri / Baik", color: "bg-indigo-500", textColor: "text-indigo-600 dark:text-indigo-400 border-indigo-100" };
+      } else if (s >= 5) {
+        return { level: "Cukup / Berkembang", color: "bg-amber-500", textColor: "text-amber-600 dark:text-amber-400 border-amber-100" };
+      } else if (s >= 3) {
+        return { level: "Perlu Bantuan", color: "bg-orange-500", textColor: "text-orange-600 dark:text-orange-400 border-orange-100" };
+      } else {
+        return { level: "Bantuan Penuh", color: "bg-rose-500", textColor: "text-rose-600 dark:text-rose-400 border-rose-100" };
+      }
+    };
+
+    // Extract all occurrences of keywords without overlapping matches
+    const allKeywordsList: { keyword: string; score: number; level: string; color: string; textColor: string }[] = [];
+    keywords.forEach(category => {
+      category.list.forEach(kw => {
+        allKeywordsList.push({
+          keyword: kw,
+          score: category.score,
+          level: category.level,
+          color: category.color,
+          textColor: category.textColor
+        });
+      });
+    });
+
+    // Sort keywords by length in descending order to match longest phrases first
+    allKeywordsList.sort((a, b) => b.keyword.length - a.keyword.length);
+
+    let tempText = text;
+    const foundMatches: { keyword: string; score: number; level: string; color: string; textColor: string; count: number }[] = [];
+
+    allKeywordsList.forEach(item => {
+      let index = tempText.indexOf(item.keyword);
+      let occurrences = 0;
+      while (index !== -1) {
+        occurrences++;
+        // Replace with space padding to maintain index alignment and prevent overlapping/double matches
+        tempText = tempText.substring(0, index) + " ".repeat(item.keyword.length) + tempText.substring(index + item.keyword.length);
+        index = tempText.indexOf(item.keyword);
+      }
+      if (occurrences > 0) {
+        foundMatches.push({ ...item, count: occurrences });
+      }
+    });
+
+    // If we have parsed matches, calculate weighted average score based on occurrences
+    if (foundMatches.length > 0) {
+      let totalWeightedScore = 0;
+      let totalCount = 0;
+      foundMatches.forEach(match => {
+        totalWeightedScore += match.score * match.count;
+        totalCount += match.count;
+      });
+
+      const weightedScore = Math.round(totalWeightedScore / totalCount);
+      const meta = getMetaForScore(weightedScore);
+      
+      return { 
+        score: weightedScore, 
+        ...meta, 
+        isMultiple: totalCount > 1,
+        totalCount,
+        matchedDetails: foundMatches.map(m => `${m.count}x "${m.keyword}"`).join(", ")
+      };
+    }
+
+    // Fallback: Positive vs Negative Word Counter
+    const positiveWords = ["baik", "meningkat", "bagus", "berkembang", "mandiri", "lancar", "bisa", "aktif", "semangat", "tuntas", "hebat", "kemajuan", "senang", "kooperatif", "percaya diri"];
+    const negativeWords = ["belum", "kurang", "sulit", "bantuan", "bimbingan", "lupa", "susah", "perlu dibantu", "rewel", "tergantung", "stagnan", "menolak", "lambat"];
+    
+    let posCount = 0;
+    let negCount = 0;
+    positiveWords.forEach(w => { if (text.includes(w)) posCount++; });
+    negativeWords.forEach(w => { if (text.includes(w)) negCount++; });
+
+    if (posCount > 0 && negCount > 0) {
+      // Mixed positive/negative keywords
+      const score = 6;
+      return { score, ...getMetaForScore(score), isMultiple: false, totalCount: 0, matchedDetails: "" };
+    }
+
+    if (posCount > negCount) {
+      return { score: 8, ...getMetaForScore(8), isMultiple: false, totalCount: 0, matchedDetails: "" };
+    } else if (negCount > posCount) {
+      return { score: 4, ...getMetaForScore(4), isMultiple: false, totalCount: 0, matchedDetails: "" };
+    }
+    return { score: 6, ...getMetaForScore(6), isMultiple: false, totalCount: 0, matchedDetails: "" };
+  };
+
+  const analyzedActivities = activities.map(act => {
+    // Check if score is manual (stored in DB) or auto-analytical
+    const hasManualScore = typeof act.score === 'number' && act.score > 0;
+    const manualScore = hasManualScore ? act.score : undefined;
+    
+    const analysis = getProgressAnalysis(act.results);
+    
+    let analysisLevel = analysis.level;
+    let analysisColor = analysis.color;
+    let analysisTextColor = analysis.textColor;
+    
+    // Scale any legacy 1-5 score to 1-10 if needed, or keep 1-10 scores as is
+    let activeScore = manualScore !== undefined ? manualScore : analysis.score;
+    if (manualScore !== undefined && manualScore <= 5) {
+      // Legacy score scale adaptation: double the score to make it out of 10 if it's old and was created out of 5
+      activeScore = manualScore * 2;
+    }
+
+    if (activeScore >= 9) {
+      analysisLevel = "Sangat Mandiri";
+      analysisColor = "bg-emerald-500";
+      analysisTextColor = "text-emerald-600 dark:text-emerald-400 border-emerald-100";
+    } else if (activeScore >= 7) {
+      analysisLevel = "Mandiri / Baik";
+      analysisColor = "bg-indigo-500";
+      analysisTextColor = "text-indigo-600 dark:text-indigo-400 border-indigo-100";
+    } else if (activeScore >= 5) {
+      analysisLevel = "Cukup / Berkembang";
+      analysisColor = "bg-amber-500";
+      analysisTextColor = "text-amber-600 dark:text-amber-400 border-amber-100";
+    } else if (activeScore >= 3) {
+      analysisLevel = "Perlu Bantuan";
+      analysisColor = "bg-orange-500";
+      analysisTextColor = "text-orange-600 dark:text-orange-400 border-orange-100";
+    } else {
+      analysisLevel = "Bantuan Penuh";
+      analysisColor = "bg-rose-500";
+      analysisTextColor = "text-rose-600 dark:text-rose-400 border-rose-100";
+    }
+
+    return {
+      ...act,
+      score: activeScore,
+      analysisLevel,
+      analysisColor,
+      analysisTextColor
+    };
+  });
+
+  const filteredChartActivities = [...analyzedActivities]
+    .filter(a => chartCategory === 'Semua' || a.category === chartCategory)
+    .sort((a, b) => a.date.toDate().getTime() - a.date.toDate().getTime());
+
+  const totalScoreVal = filteredChartActivities.reduce((sum, item) => sum + item.score, 0);
+  const averageScore = filteredChartActivities.length > 0 ? totalScoreVal / filteredChartActivities.length : 0;
+
+  let avgLevelObj = { level: 'Belum Ada Data', color: 'bg-slate-400', textColor: 'text-slate-500 dark:text-slate-400 border-slate-200' };
+  if (averageScore >= 9.0) {
+    avgLevelObj = { level: 'Sangat Mandiri', color: 'bg-emerald-500', textColor: 'text-emerald-600 dark:text-emerald-400 border-emerald-100' };
+  } else if (averageScore >= 7.0) {
+    avgLevelObj = { level: 'Mandiri / Baik', color: 'bg-indigo-500', textColor: 'text-indigo-600 dark:text-indigo-400 border-indigo-100' };
+  } else if (averageScore >= 5.0) {
+    avgLevelObj = { level: 'Cukup / Berkembang', color: 'bg-amber-500', textColor: 'text-amber-600 dark:text-amber-400 border-amber-100' };
+  } else if (averageScore >= 3.0) {
+    avgLevelObj = { level: 'Perlu Bantuan', color: 'bg-orange-500', textColor: 'text-orange-600 dark:text-orange-400 border-orange-100' };
+  } else if (averageScore > 0) {
+    avgLevelObj = { level: 'Bantuan Penuh', color: 'bg-rose-500', textColor: 'text-rose-600 dark:text-rose-400 border-rose-100' };
+  }
+
+  let trendText = "STABIL";
+  if (filteredChartActivities.length >= 2) {
+    const half = Math.ceil(filteredChartActivities.length / 2);
+    const firstHalf = filteredChartActivities.slice(0, half);
+    const lastHalf = filteredChartActivities.slice(half);
+    const firstHalfAvg = firstHalf.reduce((sum, i) => sum + i.score, 0) / firstHalf.length;
+    const lastHalfAvg = lastHalf.reduce((sum, i) => sum + i.score, 0) / lastHalf.length;
+    const diff = lastHalfAvg - firstHalfAvg;
+    if (diff > 0.4) trendText = "MENINGKAT";
+    else if (diff < -0.4) trendText = "BUTUH PERHATIAN";
+  }
+
+  const achievementsComp = filteredChartActivities
+    .filter(a => a.score >= 7)
+    .sort((a, b) => b.date.toDate().getTime() - a.date.toDate().getTime())
+    .slice(0, 3);
+
+  const supportAreasComp = filteredChartActivities
+    .filter(a => a.score <= 4)
+    .sort((a, b) => b.date.toDate().getTime() - a.date.toDate().getTime())
+    .slice(0, 3);
+
+  const chartHeight = 220;
+  const chartWidth = 700;
+  const paddingX = 45;
+  const paddingY = 40;
+
+  const points = filteredChartActivities.map((act, idx) => {
+    const x = filteredChartActivities.length > 1
+      ? paddingX + (idx * (chartWidth - paddingX * 2) / (filteredChartActivities.length - 1))
+      : chartWidth / 2;
+    const y = chartHeight - paddingY - ((act.score - 1) * (chartHeight - paddingY * 2) / 9);
+    return { x, y, act, score: act.score, level: act.analysisLevel };
+  });
+
+  let linePath = "";
+  let areaPath = "";
+  if (points.length > 1) {
+    linePath = `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
+    areaPath = `${linePath} L ${points[points.length - 1].x} ${chartHeight - paddingY} L ${points[0].x} ${chartHeight - paddingY} Z`;
+  }
 
   const handleAddActivity = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -259,6 +529,7 @@ export default function StudentDetail() {
         category: newActivity.category,
         classActivity: newActivity.classActivity.trim(),
         results: newActivity.results.trim(),
+        score: newActivity.score > 0 ? newActivity.score : getProgressAnalysis(newActivity.results).score,
         attachment: processedAttachments[0] || null,
         attachments: processedAttachments,
         createdBy: auth.currentUser?.uid,
@@ -270,6 +541,7 @@ export default function StudentDetail() {
         category: activeCategory !== 'Semua' ? activeCategory : 'Peksos',
         classActivity: '',
         results: '',
+        score: 0,
         attachments: []
       });
       setShowAddModal(false);
@@ -287,12 +559,14 @@ export default function StudentDetail() {
     category: Activity['category'];
     classActivity: string;
     results: string;
+    score: number;
     attachments: NonNullable<Activity['attachments']>;
   }>({
     date: '',
     category: 'Peksos',
     classActivity: '',
     results: '',
+    score: 0,
     attachments: []
   });
   const [showDeleteStudentModal, setShowDeleteStudentModal] = useState(false);
@@ -402,6 +676,7 @@ export default function StudentDetail() {
         category: editActivityForm.category,
         classActivity: editActivityForm.classActivity.trim(),
         results: editActivityForm.results.trim(),
+        score: editActivityForm.score > 0 ? editActivityForm.score : getProgressAnalysis(editActivityForm.results).score,
         attachment: processedAttachments[0] || null,
         attachments: processedAttachments,
         updatedAt: serverTimestamp()
@@ -511,11 +786,18 @@ export default function StudentDetail() {
   const openEditActivityModal = (activity: Activity) => {
     setFileError(null);
     setActivityToEdit(activity);
+    
+    let initialScore = typeof activity.score === 'number' && activity.score > 0 ? activity.score : getProgressAnalysis(activity.results).score;
+    if (initialScore > 0 && initialScore <= 5) {
+      initialScore = initialScore * 2;
+    }
+
     setEditActivityForm({
       date: activity.date?.toDate().toISOString().split('T')[0] || '',
       category: activity.category || 'Peksos',
       classActivity: activity.classActivity,
       results: activity.results,
+      score: initialScore,
       attachments: activity.attachments || (activity.attachment ? [activity.attachment] : [])
     });
   };
@@ -938,7 +1220,358 @@ export default function StudentDetail() {
           </div>
         </div>
 
-        {/* History Table Card */}
+        {/* Development Analytics & Interactive Chart Node */}
+        <div className="lg:col-span-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[3rem] p-10 flex flex-col shadow-sm relative overflow-hidden">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+            <div>
+              <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight flex items-center gap-3">
+                <div className="w-2 h-8 bg-indigo-600 rounded-full animate-pulse" />
+                Matrik & Grafik Perkembangan
+              </h3>
+              <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">
+                Visualisasi integratif kemajuan Penerima Manfaat berdasarkan histori laporan
+              </p>
+            </div>
+
+            {/* Filter Kategori untuk Grafik */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-100 dark:border-slate-700/60 overflow-x-auto max-w-full">
+              <button
+                type="button"
+                onClick={() => setChartCategory('Semua')}
+                className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap ${
+                  chartCategory === 'Semua'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                    : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+                }`}
+              >
+                Semua Penyusun
+              </button>
+              {Array.from(new Set(activities.map(a => a.category))).filter(Boolean).map(cat => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setChartCategory(cat)}
+                  className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap ${
+                    chartCategory === cat
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                      : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activities.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center border-4 border-dashed border-slate-50 dark:border-slate-800/50 rounded-[2.5rem]">
+              <Sparkles className="text-slate-300 dark:text-slate-600 mb-4 animate-pulse" size={48} />
+              <p className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Memerlukan Laporan Pertama</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mt-2 px-6 leading-relaxed font-medium">
+                Grafik & matrik perkembangan akan terbuat otomatis setelah Anda menginput laporan aktivitas harian.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              
+              {/* Left Column: Analytics cards & stats - col-span-4 */}
+              <div className="lg:col-span-4 space-y-4 flex flex-col justify-between">
+                
+                {/* 1. Average Rating Badge Card */}
+                <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 p-6 rounded-3xl flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block">RATA-RATA KEMANDIRIAN</span>
+                    <h4 className="text-2xl font-black text-slate-800 dark:text-white leading-none">
+                      {averageScore.toFixed(1)} <span className="text-xs text-slate-400 font-bold">/ 10.0</span>
+                    </h4>
+                    <span className={`text-[8px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg border ${avgLevelObj.textColor} ${avgLevelObj.color === 'bg-emerald-500' ? 'border-emerald-100 bg-emerald-50/50 dark:bg-emerald-950/10' : avgLevelObj.color === 'bg-indigo-500' ? 'border-indigo-100 bg-indigo-50/50 dark:bg-indigo-950/10' : avgLevelObj.color === 'bg-amber-500' ? 'border-amber-100 bg-amber-50/50 dark:bg-amber-950/10' : 'border-rose-100 bg-rose-50/50 dark:bg-rose-950/10'} mt-2 inline-block`}>
+                      {avgLevelObj.level}
+                    </span>
+                  </div>
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${avgLevelObj.color === 'bg-emerald-500' ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500' : avgLevelObj.color === 'bg-indigo-500' ? 'bg-indigo-50 dark:bg-indigo-950/20 text-indigo-500' : avgLevelObj.color === 'bg-amber-500' ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-500' : 'bg-rose-50 dark:bg-rose-950/20 text-rose-500'}`}>
+                    <Sparkles size={24} />
+                  </div>
+                </div>
+
+                {/* 2. Trend Badge Card */}
+                <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 p-6 rounded-3xl flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block">KECENDERUNGAN TREN</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase leading-none">
+                      {trendText === "MENINGKAT" ? (
+                        <span className="text-emerald-500 flex items-center gap-1">MENINGKAT</span>
+                      ) : trendText === "BUTUH PERHATIAN" ? (
+                        <span className="text-rose-500 flex items-center gap-1">BUTUH PERHATIAN</span>
+                      ) : (
+                        <span className="text-amber-500 flex items-center gap-1">STABIL KONSISTEN</span>
+                      )}
+                    </h4>
+                    <span className="text-[8px] text-slate-400 font-bold block">
+                      Perbandingan performa moving average harian
+                    </span>
+                  </div>
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center bg-slate-100 dark:bg-slate-800`}>
+                    {trendText === "MENINGKAT" ? (
+                      <TrendingUp className="text-emerald-500" size={24} />
+                    ) : trendText === "BUTUH PERHATIAN" ? (
+                      <TrendingDown className="text-rose-500" size={24} />
+                    ) : (
+                      <Minus className="text-amber-500" size={24} strokeWidth={3} />
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Consistency Index */}
+                <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 p-6 rounded-3xl flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block">GRAFIK AKTIF</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white leading-none uppercase line-clamp-1">
+                      {chartCategory === 'Semua' ? 'Semua Penyusun' : chartCategory}
+                    </h4>
+                    <span className="text-[8px] text-slate-400 font-bold block">
+                      {filteredChartActivities.length} Laporan terpetakan
+                    </span>
+                  </div>
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/20 flex items-center justify-center text-indigo-500 font-black text-lg">
+                    {filteredChartActivities.length}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Middle Column: Interactive SVG Chart - col-span-8 */}
+              <div className="lg:col-span-8 bg-slate-50 dark:bg-slate-950 p-6 rounded-3xl border border-slate-100 dark:border-slate-800/80 flex flex-col justify-between">
+                <div>
+                  <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">TRAJEKTORI PERKEMBANGAN PM</h4>
+                  
+                  {filteredChartActivities.length === 0 ? (
+                    <div className="flex items-center justify-center h-[200px] border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-2xl">
+                      <p className="text-[10px] font-black uppercase text-slate-300 dark:text-slate-700 tracking-widest">Tidak ada data untuk filter "{chartCategory}"</p>
+                    </div>
+                  ) : (
+                    <div className="relative w-full overflow-hidden">
+                      {/* Responsive SVG Chart */}
+                      <svg 
+                        viewBox={`0 0 ${chartWidth} ${chartHeight}`} 
+                        className="w-full h-auto drop-shadow-sm select-none"
+                      >
+                        <defs>
+                          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#4338ca" stopOpacity="0.15" />
+                            <stop offset="100%" stopColor="#4338ca" stopOpacity="0" />
+                          </linearGradient>
+                        </defs>
+
+                        {/* Grid Lines */}
+                        {[2, 4, 6, 8, 10].map((level) => {
+                          const yGrid = chartHeight - paddingY - ((level - 1) * (chartHeight - paddingY * 2) / 9);
+                          return (
+                            <g key={level}>
+                              <text
+                                x={paddingX - 8}
+                                y={yGrid + 3}
+                                textAnchor="end"
+                                className="fill-slate-400 dark:fill-slate-500 font-mono font-black text-[9px]"
+                              >
+                                {level}
+                              </text>
+                              <line 
+                                x1={paddingX} 
+                                y1={yGrid} 
+                                x2={chartWidth - paddingX} 
+                                y2={yGrid} 
+                                className="stroke-slate-200 dark:stroke-slate-800/50" 
+                                strokeWidth={1}
+                                strokeDasharray="4 4"
+                              />
+                            </g>
+                          );
+                        })}
+
+                        {/* Area Fill beneath curves */}
+                        {points.length > 1 && (
+                          <path 
+                            d={areaPath} 
+                            fill="url(#areaGrad)" 
+                            className="transition-all duration-500 ease-in-out"
+                          />
+                        )}
+
+                        {/* Main Trend Line path */}
+                        {points.length > 1 && (
+                          <path 
+                            d={linePath} 
+                            fill="none" 
+                            className="stroke-indigo-600 dark:stroke-indigo-400 transition-all duration-500 ease-in-out" 
+                            strokeWidth={3} 
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        )}
+
+                        {/* Interactive Data Nodes */}
+                        {points.map((pt, idx) => (
+                          <g key={pt.act.id}>
+                            {/* Larger hover circle tracker */}
+                            <circle 
+                              cx={pt.x} 
+                              cy={pt.y} 
+                              r={15} 
+                              fill="transparent" 
+                              className="cursor-pointer"
+                              onMouseEnter={() => setHoveredPoint(pt)}
+                              onMouseLeave={() => setHoveredPoint(null)}
+                              onClick={() => setSelectedActivityForDetail(pt.act)}
+                            />
+                            {/* Inner visual dot */}
+                            <circle 
+                              cx={pt.x} 
+                              cy={pt.y} 
+                              r={hoveredPoint?.act.id === pt.act.id ? 7 : 4} 
+                              className={`transition-all duration-200 cursor-pointer ${
+                                pt.score >= 9 ? 'fill-emerald-500' :
+                                pt.score >= 7 ? 'fill-indigo-500' :
+                                pt.score >= 5 ? 'fill-amber-500' :
+                                pt.score >= 3 ? 'fill-orange-500' : 'fill-rose-500'
+                              } ${
+                                hoveredPoint?.act.id === pt.act.id 
+                                  ? 'stroke-white dark:stroke-slate-900 stroke-[3px] scale-125' 
+                                  : 'stroke-white/80 dark:stroke-slate-950/80 stroke-2'
+                              }`} 
+                              onMouseEnter={() => setHoveredPoint(pt)}
+                              onMouseLeave={() => setHoveredPoint(null)}
+                              onClick={() => setSelectedActivityForDetail(pt.act)}
+                            />
+                          </g>
+                        ))}
+                      </svg>
+
+                      {/* Floating Interactive Tooltip */}
+                      <AnimatePresence>
+                        {hoveredPoint && (
+                          <motion.div 
+                            initial={{ opacity: 0, scale: 0.9, y: 5 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            className="absolute z-10 bg-slate-950 text-white rounded-2xl p-4 shadow-xl max-w-xs border border-white/10 pointer-events-none"
+                            style={{
+                              left: `${Math.min(78, Math.max(3, (hoveredPoint.x / chartWidth) * 100))}%`,
+                              top: `${Math.min(52, Math.max(2, (hoveredPoint.y / chartHeight) * 100 - 32))}%`
+                            }}
+                          >
+                            <span className="text-[8px] font-black uppercase text-indigo-300 tracking-wider block mb-1">
+                              {hoveredPoint.act.category} &bull; {hoveredPoint.act.date.toDate().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                            </span>
+                            <p className="text-[10px] font-black uppercase tracking-widest line-clamp-1">{hoveredPoint.act.classActivity}</p>
+                            <p className="text-[9px] text-slate-300 line-clamp-2 mt-1 italic font-medium">"{hoveredPoint.act.results}"</p>
+                            <div className="flex justify-between items-center mt-2.5 border-t border-white/10 pt-1.5 gap-4">
+                              <span className="text-[8px] font-black uppercase text-slate-400">SKOR & STATUS:</span>
+                              <span className="text-[8px] font-black uppercase text-indigo-300 font-mono">{hoveredPoint.score}/10 &bull; {hoveredPoint.level}</span>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                  {/* Chart Legend */}
+                  <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mt-4 text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-800/80 pt-4">
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500" /> Sangat Mandiri</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-indigo-500" /> Mandiri / Baik</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-500" /> Sedang Berkembang</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500" /> Perlu Bantuan</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500" /> Bantuan Penuh</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Row/Section: Semantic Highlight Areas Grid - spans 12 */}
+              <div className="lg:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-6 mt-2 border-t border-slate-100 dark:border-slate-800/60 pt-6">
+                
+                {/* 1. Achievements (Capaian Terbaik) */}
+                <div className="bg-emerald-50/20 dark:bg-emerald-950/5 border border-emerald-100/40 dark:border-emerald-500/10 rounded-3xl p-6.5">
+                  <h5 className="text-[10px] font-black tracking-widest text-emerald-600 dark:text-emerald-400 uppercase flex items-center gap-2 mb-4">
+                    <CheckCircle2 size={16} />
+                    CAPAIAN TERBAIK & PERKEMBANGAN POSITIF
+                  </h5>
+
+                  <div className="space-y-3.5">
+                    {achievementsComp.length === 0 ? (
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest italic font-bold">Belum tercatat capaian memuaskan khusus di rentang laporan ini.</p>
+                    ) : (
+                      achievementsComp.map((ach, idx) => {
+                        const isExpanded = expandedActivityIds.includes(ach.id);
+                        const isLongText = ach.results && ach.results.length > 150;
+                        const displayText = isExpanded ? ach.results : (isLongText ? `${ach.results.slice(0, 150)}...` : ach.results);
+                        return (
+                          <div key={idx} className="flex gap-3 items-start">
+                            <span className="w-5 h-5 rounded-md bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">{idx + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-black text-slate-700 dark:text-slate-200 uppercase tracking-wide leading-none">{ach.classActivity}</p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic font-medium leading-relaxed">
+                                "{displayText}"
+                              </p>
+                              {isLongText && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleActivityExpanded(ach.id)}
+                                  className="text-[9px] font-black uppercase text-emerald-600 dark:text-emerald-400 mt-1.5 hover:underline focus:outline-none cursor-pointer flex items-center gap-1"
+                                >
+                                  {isExpanded ? 'Sembunyikan' : 'Selengkapnya'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Focus/Practice Goals (Fokus Latihan / Butuh Perhatian) */}
+                <div className="bg-rose-50/20 dark:bg-rose-950/5 border border-rose-100/40 dark:border-rose-500/10 rounded-3xl p-6.5">
+                  <h5 className="text-[10px] font-black tracking-widest text-rose-600 dark:text-rose-400 uppercase flex items-center gap-2 mb-4">
+                    <AlertTriangle size={16} />
+                    FOKUS LATIHAN & DUKUNGAN LANJUTAN
+                  </h5>
+
+                  <div className="space-y-3.5">
+                    {supportAreasComp.length === 0 ? (
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest italic font-bold">Penerima manfaat menunjukkan kemandirian menyeluruh yang stabil!</p>
+                    ) : (
+                      supportAreasComp.map((sup, idx) => {
+                        const isExpanded = expandedActivityIds.includes(sup.id);
+                        const isLongText = sup.results && sup.results.length > 150;
+                        const displayText = isExpanded ? sup.results : (isLongText ? `${sup.results.slice(0, 150)}...` : sup.results);
+                        return (
+                          <div key={idx} className="flex gap-3 items-start">
+                            <span className="w-5 h-5 rounded-md bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">{idx + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-black text-slate-700 dark:text-slate-200 uppercase tracking-wide leading-none">{sup.classActivity}</p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic font-medium leading-relaxed">
+                                "{displayText}"
+                              </p>
+                              {isLongText && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleActivityExpanded(sup.id)}
+                                  className="text-[9px] font-black uppercase text-rose-600 dark:text-rose-400 mt-1.5 hover:underline focus:outline-none cursor-pointer flex items-center gap-1"
+                                >
+                                  {isExpanded ? 'Sembunyikan' : 'Selengkapnya'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          )}
+        </div>
         <div className="lg:col-span-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[3rem] p-10 flex flex-col shadow-sm">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight flex items-center gap-3 shrink-0">
@@ -1473,9 +2106,75 @@ export default function StudentDetail() {
                       rows={3}
                       value={newActivity.results}
                       onChange={e => setNewActivity({...newActivity, results: e.target.value})}
-                      className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans mb-4"
+                      className="w-full px-5 py-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[11px] font-medium text-slate-700 dark:text-white resize-y min-h-[100px] outline-none focus:border-indigo-500/50 dark:focus:border-indigo-500/50 focus:bg-white dark:focus:bg-white/10 transition-all font-sans"
                       placeholder="Bagaimana hasil kegiatannya?"
                     />
+                  </div>
+
+                  {/* Skor Manual & Rekomendasi Pintar */}
+                  <div className="bg-slate-50 dark:bg-white/5 p-5 rounded-2xl border border-slate-100 dark:border-white/10 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div>
+                        <label className="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] block mb-0.5">Skor Perkembangan (1 - 10)</label>
+                        <p className="text-[8px] text-slate-400/80 font-bold uppercase">Skor pencapaian kemandirian Penerima Manfaat</p>
+                      </div>
+                      {renderInteractiveScoreBadge(newActivity.score)}
+                    </div>
+
+                    {/* Radio Button Selector for 1-10 scores */}
+                    <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map(num => {
+                        const isSelected = newActivity.score === num;
+                        return (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => setNewActivity({...newActivity, score: num})}
+                            className={`py-2 text-xs font-black rounded-xl transition-all border cursor-pointer select-none text-center ${
+                              isSelected
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                                : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-850 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {num}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* AI Smart Recommendation Badge */}
+                    {newActivity.results.trim().length > 4 && (() => {
+                      const rec = getProgressAnalysis(newActivity.results);
+                      const isApplied = newActivity.score === rec.score;
+                      return (
+                        <div className="flex flex-col gap-2 p-3 bg-indigo-50/40 dark:bg-indigo-950/10 border border-indigo-100/30 dark:border-indigo-500/10 rounded-xl">
+                          <div className="flex items-center justify-between gap-3 w-full">
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={14} className="text-indigo-500 shrink-0" />
+                              <div className="text-[10px] text-slate-600 dark:text-slate-300 font-bold leading-none">
+                                Rekomendasi Pintar (AI): <span className="text-indigo-600 dark:text-indigo-400 font-black font-mono">{rec.score}</span> <span className="text-[9px] font-bold text-slate-400">[{rec.level}]</span>
+                              </div>
+                            </div>
+                            {!isApplied ? (
+                              <button
+                                type="button"
+                                onClick={() => setNewActivity({...newActivity, score: rec.score})}
+                                className="px-2.5 py-1 bg-indigo-600 dark:bg-indigo-500 hover:bg-indigo-700 hover:dark:bg-indigo-600 text-[8px] font-black uppercase text-white rounded-md tracking-wider transition-all cursor-pointer"
+                              >
+                                Terapkan
+                              </button>
+                            ) : (
+                              <span className="text-[8px] font-black uppercase text-emerald-500 tracking-wider flex items-center gap-1">✓ Diterapkan</span>
+                            )}
+                          </div>
+                          {rec.isMultiple && rec.matchedDetails && (
+                            <div className="text-[9px] text-slate-500 dark:text-slate-400 border-t border-indigo-100/30 dark:border-indigo-500/10 pt-2 font-medium italic">
+                              Rata-rata dari beberapa keterangan mandiri terpilih: {rec.matchedDetails}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div>
@@ -1653,6 +2352,72 @@ export default function StudentDetail() {
                       onChange={e => setEditActivityForm({...editActivityForm, results: e.target.value})}
                       className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-700 dark:text-slate-200 resize-y min-h-[100px] outline-none focus:ring-4 focus:ring-indigo-50 dark:focus:ring-indigo-500/10 transition-all font-sans"
                     />
+                  </div>
+
+                  {/* Skor Manual & Rekomendasi Pintar */}
+                  <div className="bg-slate-50 dark:bg-slate-800/40 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-0.5">Skor Perkembangan (1 - 10)</label>
+                        <p className="text-[8px] text-slate-400/80 font-bold uppercase">Skor pencapaian kemandirian Penerima Manfaat</p>
+                      </div>
+                      {renderInteractiveScoreBadge(editActivityForm.score)}
+                    </div>
+
+                    {/* Radio Button Selector for 1-10 scores */}
+                    <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map(num => {
+                        const isSelected = editActivityForm.score === num;
+                        return (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => setEditActivityForm({...editActivityForm, score: num})}
+                            className={`py-2 text-xs font-black rounded-xl transition-all border cursor-pointer select-none text-center ${
+                              isSelected
+                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-none'
+                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {num}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* AI Smart Recommendation Badge */}
+                    {editActivityForm.results.trim().length > 4 && (() => {
+                      const rec = getProgressAnalysis(editActivityForm.results);
+                      const isApplied = editActivityForm.score === rec.score;
+                      return (
+                        <div className="flex flex-col gap-2 p-3 bg-indigo-50/40 dark:bg-indigo-950/10 border border-indigo-100/30 dark:border-indigo-500/10 rounded-xl">
+                          <div className="flex items-center justify-between gap-3 w-full">
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={14} className="text-indigo-500 shrink-0" />
+                              <div className="text-[10px] text-slate-600 dark:text-slate-300 font-bold leading-none">
+                                Rekomendasi Pintar (AI): <span className="text-indigo-600 dark:text-indigo-400 font-black font-mono">{rec.score}</span> <span className="text-[9px] font-bold text-slate-400">[{rec.level}]</span>
+                              </div>
+                            </div>
+                            {!isApplied ? (
+                              <button
+                                type="button"
+                                onClick={() => setEditActivityForm({...editActivityForm, score: rec.score})}
+                                className="px-2.5 py-1 bg-indigo-600 dark:bg-indigo-500 hover:bg-indigo-700 hover:dark:bg-indigo-600 text-[8px] font-black uppercase text-white rounded-md tracking-wider transition-all cursor-pointer"
+                              >
+                                Terapkan
+                              </button>
+                            ) : (
+                              <span className="text-[8px] font-black uppercase text-emerald-500 tracking-wider flex items-center gap-1">✓ Diterapkan</span>
+                            )}
+                          </div>
+                          {rec.isMultiple && rec.matchedDetails && (
+                            <div className="text-[9px] text-slate-500 dark:text-slate-400 border-t border-indigo-100/30 dark:border-indigo-500/10 pt-2 font-medium italic">
+                              Rata-rata dari beberapa keterangan mandiri terpilih: {rec.matchedDetails}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div>

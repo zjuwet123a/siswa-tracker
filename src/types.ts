@@ -42,6 +42,7 @@ export interface Activity {
   category: string;
   classActivity: string;
   results: string;
+  score?: number;
   createdBy?: string;
   createdByName?: string;
   attachment?: {
